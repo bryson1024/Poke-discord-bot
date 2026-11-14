@@ -90,7 +90,17 @@ export const PLAYBACK = { maxUpdates: 12, delayMs: 2000, maxAtOnce: 2 };
 // sim even as Experts. The Elite Four is the exception (owner decision,
 // 2026-11-12): its gate is Lv 70 rather than today's 73, so its boost is
 // just under 1 (`--target 70`, 1437 s).
+// mythicStatBoost (owner decision, 2026-11-14): the Elite Four, Blue and
+// Red's boost against a Team with 3 or more mythic-tier Pokémon; 1 and 2
+// mythics move a third and two thirds of the way from challengeStatBoost
+// (utils/challenge/runChallenge.js). Without it, 3 mythics cleared them about
+// 10 Levels lower than none (Elite Four 70 to 60, Blue 79 to 69, Red 90 to
+// 80). Each value puts 3 mythics 5 Levels lower:
+// `node tools/challenge-gates.mjs <key> --target <gate − 5> --mythics 3`
+// (2026-11-14, n 200; Elite Four 2440 s), checked by
+// tests/fullSimMythicBalance.slow.js.
 const ELITE_FOUR = 0.99;
+const ELITE_FOUR_MYTHIC = 1.09;
 export const FULL_SIM = {
   maxUpdates: 20,
   challengeStatBoost: Object.freeze({
@@ -98,6 +108,11 @@ export const FULL_SIM = {
     lorelei: ELITE_FOUR, bruno: ELITE_FOUR, agatha: ELITE_FOUR, lance: ELITE_FOUR,
     blue: 1.07, red: 1.04,
   }),
+  mythicStatBoost: Object.freeze({
+    lorelei: ELITE_FOUR_MYTHIC, bruno: ELITE_FOUR_MYTHIC, agatha: ELITE_FOUR_MYTHIC, lance: ELITE_FOUR_MYTHIC,
+    blue: 1.15, red: 1.1,
+  }),
+  mythicCap: 3,
 };
 // Trainer encounters (docs/superpowers/specs/2026-11-10-trainer-encounters-design.md;
 // every value decided 2026-11-10 unless dated). chance (1.5%, decided

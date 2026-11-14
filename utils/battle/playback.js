@@ -24,6 +24,7 @@ import { PLAYBACK, CUTE, FULL_SIM } from "./tuning.js";
 import { teamCuteness } from "./cuteness.js";
 import { trainingKey } from "../training.js";
 import { CHALLENGES, opponentName, displaySprite } from "../challenge/roster.js";
+import { mythicLine } from "../../catalog/challengeLines.js";
 import { threaded } from "../render/renderers.js";
 import { trainerTier, cardTrainerFx } from "../render/trainerTier.js";
 import { battleVsAltText } from "../render/battleVsCard.js";
@@ -319,8 +320,14 @@ export function challengeNames(outcome, playerName) {
   return names;
 }
 
-// In a run, fight i > 0 also says what the break before it revived.
+// In a run, fight i > 0 also says what the break before it revived. Last
+// comes what the opponent says about a mythic on the Team, if anything.
 export function challengeHeader(outcome, i) {
+  const fight = outcome.fights[i];
+  return [challengeHeading(outcome, i), mythicLine(fight.opponentKey, fight.mythics)].filter(Boolean).join("\n");
+}
+
+function challengeHeading(outcome, i) {
   const player = `<@${outcome.userId}>`;
   const fight = outcome.fights[i];
   const opponent = opponentOf(outcome, fight.opponentKey);

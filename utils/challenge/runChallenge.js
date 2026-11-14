@@ -21,6 +21,7 @@ import { teamPower } from "../battle/power.js";
 import { teamExp, utcDay } from "../battle/rewards.js";
 import { CHALLENGE, FULL_SIM } from "../battle/tuning.js";
 import { speciesName } from "../training.js";
+import { isMythicTier } from "../../services/battleTeam.js";
 import { TRAINER_COSTS } from "../trainerCosts.js";
 import { trackProgress } from "../../progression/achievements.js";
 import { ownsTrainer, grantTrainer } from "../../services/assets.js";
@@ -90,13 +91,31 @@ export function previewChallenge(user, key) {
 // Opponents fight with CHALLENGE.statBoost on their stats (on the full sim,
 // FULL_SIM.challengeStatBoost: they're Experts there), at the roster's Levels.
 // Full sim: their signature plan (catalog/opponentPlans.js) also picks their moves.
-const opponentMembers = (o, engine) =>
+const opponentMembers = (o, engine, mythics) =>
   o.team.map((m) => ({
     speciesId: m.speciesId, variant: "normal", name: speciesName(m.speciesId), level: m.level,
-    statMult: engine === "full" ? FULL_SIM.challengeStatBoost[o.key] ?? CHALLENGE.statBoost : CHALLENGE.statBoost,
+    statMult: engine === "full" ? fullSimBoost(o.key, mythics?.count ?? 0) : CHALLENGE.statBoost,
     ...(engine === "full" && { moves: planMoves(m.speciesId, m.level, opponentPlan(o.key).plan, FULL) }),
   }));
 const FULL = { FULL_SIM_ENABLED: "1" };
+
+// On the full sim the Elite Four, Blue and Red notice mythics on the
+// player's whole Team (decided 2026-11-14): each one, up to
+// FULL_SIM.mythicCap, moves their boost a step toward FULL_SIM.mythicStatBoost,
+// so mythics still help, just less. The line they say is
+// catalog/challengeLines.js.
+function fullSimBoost(key, count) {
+  const base = FULL_SIM.challengeStatBoost[key] ?? CHALLENGE.statBoost;
+  const top = FULL_SIM.mythicStatBoost[key];
+  return top == null || !count ? base : base + ((top - base) * Math.min(count, FULL_SIM.mythicCap)) / FULL_SIM.mythicCap;
+}
+
+/** { count, speciesId } (the first in Team order) when this opponent notices mythics on `team`, else null. */
+function noticedMythics(team, opponent, engine) {
+  if (engine !== "full" || FULL_SIM.mythicStatBoost[opponent.key] == null) return null;
+  const mythics = team.filter((m) => isMythicTier(m.speciesId));
+  return mythics.length ? { count: mythics.length, speciesId: mythics[0].speciesId } : null;
+}
 
 // One fight: opponent `i` against the player's `members`, who carry their HP
 // from earlier fights. EXP is per `team` slot. Challenges have no Underdog
@@ -104,7 +123,8 @@ const FULL = { FULL_SIM_ENABLED: "1" };
 // `simulate` runs the fight: simulateBattle (synchronous) by default, or a
 // runner's simulateLive, which is a Promise under the full sim.
 function simulateFight({ team, members, opponent, i, seed, plan, engine, simulate = simulateBattle }) {
-  const foes = opponentMembers(opponent, engine);
+  const mythics = noticedMythics(team, opponent, engine);
+  const foes = opponentMembers(opponent, engine, mythics);
   const alive = members.filter((m) => m.hpFraction === undefined || m.hpFraction > 0);
   const powers = [teamPower(alive), teamPower(foes)];
   const surge = null; // kept in the fight so playback reads the same shape as /battle
@@ -113,7 +133,7 @@ function simulateFight({ team, members, opponent, i, seed, plan, engine, simulat
     const won = result.winner === 0;
     const knockedOut = result.knockouts.filter((k) => k.bySide === 0).map((k) => foes[k.slot]);
     const gains = teamExp({ members: team, knockedOut, won });
-    return { opponentKey: opponent.key, members, foes, powers, surge, result, won, gains };
+    return { opponentKey: opponent.key, members, foes, powers, surge, result, won, gains, mythics };
   });
 }
 
@@ -179,6 +199,7 @@ const outcomeFight = (userId, f) => ({
   result: f.result,
   winnerId: f.won ? userId : f.opponentKey,
   gains: f.gains,
+  mythics: f.mythics,
 });
 
 const owns = (user, m) => (user.pokemon?.[m.speciesId]?.[m.variant] ?? 0) > 0;

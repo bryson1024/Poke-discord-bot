@@ -10,6 +10,10 @@
 //   node tools/challenge-gates.mjs <key> --target 73 [--n 200]
 //       full sim: finds the stat boost at which a Team at Lv 73 wins half
 //       its tries, then prints the gate Level with that boost
+//   --mythics 2   any of the above with 2 of each Team's 6 stand-ins drawn
+//                 from the fully evolved mythic-tier species instead (the
+//                 stand-in pool leaves out the whole legendary band, but
+//                 long-time players often field 2 or 3 mythics)
 // ==========================================================
 
 import { readFileSync } from "fs";
@@ -19,6 +23,7 @@ import { simulateBattle, loadFullSim } from "../utils/battle/sim.js";
 import { teamPower } from "../utils/battle/power.js";
 import { createRng } from "../utils/battle/rng.js";
 import { catchBand } from "../utils/training.js";
+import { isMythicTier } from "../services/battleTeam.js";
 
 const args = process.argv.slice(2);
 const key = args[0];
@@ -41,9 +46,13 @@ const pokemonData = JSON.parse(readFileSync(new URL("../pokemonData.json", impor
 const SEED = 20261109;
 const pool = Object.keys(battleData.species).map(Number)
   .filter((id) => pokemonData[id] && !(pokemonData[id].evolvesTo ?? []).length && catchBand(id) !== "legendary");
+const MYTHICS = Number(opt("mythics", 0));
+const mythicPool = Object.keys(battleData.species).map(Number)
+  .filter((id) => pokemonData[id] && !(pokemonData[id].evolvesTo ?? []).length && isMythicTier(id));
 function standIn(level, i) {
   const rng = createRng(SEED + i);
   const picked = new Set();
+  while (picked.size < MYTHICS) picked.add(mythicPool[rng.int(mythicPool.length)]);
   while (picked.size < 6) picked.add(pool[rng.int(pool.length)]);
   return [...picked].map((speciesId) => ({ speciesId, variant: "normal", level }));
 }
@@ -89,4 +98,4 @@ if (target != null) {
   boost = Math.floor(lo * 100) / 100;
 }
 const g = gate(boost);
-console.log(`${key}: ${engine} engine, boost ${boost ?? "roster"}, gate Lv ${g}${target != null ? ` (target Lv ${target})` : ""}, n ${N}, ${((Date.now() - started) / 1000).toFixed(0)} s`);
+console.log(`${key}: ${engine} engine, boost ${boost ?? "roster"}, ${MYTHICS} mythics, gate Lv ${g}${target != null ? ` (target Lv ${target})` : ""}, n ${N}, ${((Date.now() - started) / 1000).toFixed(0)} s`);
