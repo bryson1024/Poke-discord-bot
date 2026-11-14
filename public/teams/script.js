@@ -638,7 +638,7 @@ function boxPanel(where) {
       </select>
       <div class="tm-seg" role="group" aria-label="Show">${seg("all", "All")}${seg("shiny", "Shiny")}${seg("free", "Not on a team")}</div>
     </div>
-    <div class="tm-boxlist" data-boxlist="${where}">${boxList(items)}</div>`;
+    <div class="tm-boxlist" data-boxlist="${where}">${boxList()}</div>`;
 }
 
 function boxList(items = boxItems()) {
@@ -697,7 +697,8 @@ document.body.insertAdjacentHTML("afterbegin", ICONS);
 function render() {
   const searchFocus = document.activeElement?.dataset?.act === "search" ? { where: document.activeElement.id, pos: document.activeElement.selectionStart } : null;
   app.innerHTML = `${switcher()}<div class="tm-layout">${teamPanel()}<aside class="tm-panel tm-boxpanel" aria-labelledby="boxHeading">${NARROW.matches ? "" : boxPanel("side")}</aside></div>${saveBar()}`;
-  if (view.get().active !== state.active) { view.set({ active: state.active }); setUrlParam("team", state.active); }
+  if (view.get().active !== state.active) view.set({ active: state.active });
+  if (new URLSearchParams(location.search).get("team") !== state.active) setUrlParam("team", state.active);
   if (sheet.open) { sheetBody.innerHTML = boxPanel("sheet"); scanFx(sheetBody); }
   scanFx(app); // shiny backdrops (same as the Discord cards)
   document.getElementById("boxSheetTitle").textContent = `Add to your ${LABEL[state.active]}`;

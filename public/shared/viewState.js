@@ -43,6 +43,9 @@ export function viewState(page, defaults = {}) {
   let current = { ...defaults, ...clean(read(page), defaults) };
   let scrollY = Number(read(`${page}:scroll`).y) || 0;
   let tracking = false;
+  // A page using this restores its own scroll once its data has drawn; the
+  // browser's automatic restore would run first, on an empty page.
+  try { if (scrollY > 0) history.scrollRestoration = "manual"; } catch { /* ignore */ }
   const saveScroll = () => write(`${page}:scroll`, { y: Math.round(window.scrollY) });
 
   return {
@@ -64,8 +67,17 @@ export function viewState(page, defaults = {}) {
       scrollY = 0;
       if (!(y > 0)) return;
       // After layout: content is drawn from async data, so the browser's own
-      // restore ran before the grid existed.
-      requestAnimationFrame(() => window.scrollTo(0, Math.min(y, document.documentElement.scrollHeight)));
+      // restore ran before the grid existed (switched off above).
+      // Again once images have loaded, unless the player scrolled meanwhile.
+      let moved = false;
+      const go = () => { if (!moved) window.scrollTo(0, Math.min(y, document.documentElement.scrollHeight)); };
+      requestAnimationFrame(() => {
+        go();
+        const watch = () => { if (Math.abs(window.scrollY - y) > 4) { moved = true; window.removeEventListener("scroll", watch); } };
+        window.addEventListener("scroll", watch, { passive: true });
+      });
+      if (document.readyState !== "complete") window.addEventListener("load", go, { once: true });
+      else setTimeout(go, 300);
     },
   };
 }
