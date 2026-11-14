@@ -521,7 +521,7 @@ function teamCheckPanel() {
       .sort((a, b) => b.weak - a.weak || (a.resist + a.immune) - (b.resist + b.immune)).slice(0, 8);
     const cell = (n, cls) => `<td class="${n ? cls : "is-zero"}">${n}</td>`;
     body = `
-      ${d.headline?.tryTypes?.length ? `<p class="tm-check-tip">Try a ${d.headline.tryTypes.map((x) => `<span class="cc-type" data-type="${esc(x.toLowerCase())}">${esc(x)}</span>`).join(" or ")} type.</p>` : ""}
+      ${d.headline?.tryTypes?.length ? `<p class="tm-check-tip">Types that resist ${esc(d.headline.type)}: ${d.headline.tryTypes.map((x) => `<span class="cc-type" data-type="${esc(x.toLowerCase())}">${esc(x)}</span>`).join(" ")}</p>` : ""}
       <div class="tm-check-scroll"><table class="tm-check-table">
         <thead><tr><th scope="row">Attack</th>${rows.map((w) => `<th scope="col"><span class="cc-type" data-type="${esc(w.type.toLowerCase())}">${esc(w.type)}</span></th>`).join("")}</tr></thead>
         <tbody>
