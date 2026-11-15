@@ -22,6 +22,7 @@ import { teamExp, utcDay } from "../battle/rewards.js";
 import { CHALLENGE, FULL_SIM } from "../battle/tuning.js";
 import { speciesName } from "../training.js";
 import { isMythicTier } from "../../services/battleTeam.js";
+import { createRng } from "../battle/rng.js";
 import { TRAINER_COSTS } from "../trainerCosts.js";
 import { trackProgress } from "../../progression/achievements.js";
 import { ownsTrainer, grantTrainer } from "../../services/assets.js";
@@ -110,11 +111,15 @@ function fullSimBoost(key, count) {
   return top == null || !count ? base : base + ((top - base) * Math.min(count, FULL_SIM.mythicCap)) / FULL_SIM.mythicCap;
 }
 
-/** { count, speciesId } (the first in Team order) when this opponent notices mythics on `team`, else null. */
-function noticedMythics(team, opponent, engine) {
+/**
+ * { count, speciesId } when this opponent notices mythics on `team`, else
+ * null. The one they name is drawn from the fight's seed, so each fight
+ * picks its own and a replay (or a Fight record's re-run) names the same one.
+ */
+function noticedMythics(team, opponent, engine, fightSeed) {
   if (engine !== "full" || FULL_SIM.mythicStatBoost[opponent.key] == null) return null;
   const mythics = team.filter((m) => isMythicTier(m.speciesId));
-  return mythics.length ? { count: mythics.length, speciesId: mythics[0].speciesId } : null;
+  return mythics.length ? { count: mythics.length, speciesId: mythics[createRng(fightSeed).int(mythics.length)].speciesId } : null;
 }
 
 // One fight: opponent `i` against the player's `members`, who carry their HP
@@ -123,13 +128,14 @@ function noticedMythics(team, opponent, engine) {
 // `simulate` runs the fight: simulateBattle (synchronous) by default, or a
 // runner's simulateLive, which is a Promise under the full sim.
 function simulateFight({ team, members, opponent, i, seed, plan, engine, simulate = simulateBattle }) {
-  const mythics = noticedMythics(team, opponent, engine);
+  const fightSeed = seed + 2 * i + 1;
+  const mythics = noticedMythics(team, opponent, engine, fightSeed);
   const foes = opponentMembers(opponent, engine, mythics);
   const alive = members.filter((m) => m.hpFraction === undefined || m.hpFraction > 0);
   const powers = [teamPower(alive), teamPower(foes)];
   const surge = null; // kept in the fight so playback reads the same shape as /battle
   // `engine` goes in with the fight, so the default simulateBattle (and a Fight record's re-run) fights on it too.
-  return after(simulate({ sides: [{ members, plan }, { members: foes, ...opponentPlan(opponent.key) }], seed: seed + 2 * i + 1, surge, ...(engine && { engine }) }), (result) => {
+  return after(simulate({ sides: [{ members, plan }, { members: foes, ...opponentPlan(opponent.key) }], seed: fightSeed, surge, ...(engine && { engine }) }), (result) => {
     const won = result.winner === 0;
     const knockedOut = result.knockouts.filter((k) => k.bySide === 0).map((k) => foes[k.slot]);
     const gains = teamExp({ members: team, knockedOut, won });

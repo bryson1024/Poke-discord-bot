@@ -2,10 +2,12 @@
 // catalog/challengeLines.js — what the Elite Four, Blue and Red say when
 // the player's Team has a mythic (full sim only, decided 2026-11-14). The
 // line shows under the fight's heading (utils/battle/playback.js
-// challengeHeader) and names the first mythic in Team order. Each speaker
-// has their own line for every mythic-tier species. Their stat boost rises
-// with each mythic (utils/battle/tuning.js FULL_SIM.mythicStatBoost), but
-// they always fight to win, so no line hints they'd try less without one.
+// challengeHeader) and names one mythic on the Team, drawn from the fight's
+// seed (utils/challenge/runChallenge.js), so each fight can name a different
+// one and a replay names the same one. Each speaker has their own line for
+// every mythic-tier species. Their stat boost rises with each mythic
+// (utils/battle/tuning.js FULL_SIM.mythicStatBoost), but they always fight
+// to win, so no line hints they'd try less without one.
 // Red never talks: his silence just runs longer, up to 3 mythics.
 // ==========================================================
 

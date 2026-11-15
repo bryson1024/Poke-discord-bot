@@ -33,6 +33,11 @@ function firstFight(key, members, engine = "full") {
   return { foes: sides[1].members, fight: run.fights[0] };
 }
 const boostOf = (key, members, engine) => firstFight(key, members, engine).foes[0].statMult;
+// Every fight of the Challenge, with the stub winning each one at full HP.
+function allFights(key, members, seed) {
+  const win = () => ({ winner: 0, knockouts: [], snapshots: [[members.map(() => 1), [0]]] });
+  return simulateChallenge({ team: members, opponents: CHALLENGES[key].opponents, seed, engine: "full", simulate: win }).fights;
+}
 
 section("The stat boost");
 {
@@ -56,7 +61,16 @@ section("The stat boost");
 
 section("What the fight records");
 {
-  assertEqual(firstFight("red", team(6, GIRATINA, MEWTWO)).fight.mythics, { count: 2, speciesId: GIRATINA }, "how many, and the first one in Team order");
+  const three = team(6, GIRATINA, 9, MEWTWO, MEW, 3);
+  const named = (key, seed) => allFights(key, three, seed).map((f) => f.mythics);
+  assertEqual(named("red", 7)[0].count, 3, "how many mythics");
+  const reds = Array.from({ length: 30 }, (_, seed) => named("red", seed)[0].speciesId);
+  assertTrue(reds.every((id) => [GIRATINA, MEWTWO, MEW].includes(id)), "the one named is always a mythic on the Team");
+  assertEqual(new Set(reds).size, 3, `any of them can be named, not just the first in Team order (${reds.join(" ")})`);
+  assertEqual(named("elite4", 11), named("elite4", 11), "the same seed names the same ones, so a replay and a Fight record's re-run match");
+  const runs = Array.from({ length: 10 }, (_, seed) => named("elite4", seed).map((m) => m.speciesId));
+  assertTrue(runs.every((r) => r.length === 4), "the stub wins all four Elite Four fights");
+  assertTrue(runs.some((r) => new Set(r).size > 1), "each of the Elite Four picks one for themselves");
   assertEqual(firstFight("red", withMythics(0)).fight.mythics, null, "no mythics, nothing");
   assertEqual(firstFight("brock", withMythics(3)).fight.mythics, null, "a Gym Leader doesn't notice");
   assertEqual(firstFight("red", withMythics(3), "legacy").fight.mythics, null, "nor does anyone on today's engine");
@@ -116,17 +130,22 @@ section("Real fights on the full sim");
   try {
     const red = await runChallenge({ trainerData: td, userId: "A", key: "red", seed: 1, now });
     assertEqual(red.engine, "full", "Red fights on the full sim");
-    assertEqual(red.fights[0].mythics, { count: 2, speciesId: GIRATINA }, "the outcome keeps what Red noticed");
+    const onTeam = (m) => m?.count === 2 && [GIRATINA, MEWTWO].includes(m.speciesId);
+    assertTrue(onTeam(red.fights[0].mythics), `the outcome keeps what Red noticed: ${JSON.stringify(red.fights[0].mythics)}`);
     assertEqual(challengeHeader(red, 0).split("\n")[1], '**Red:** "......"', "and his heading shows two mythics' worth of silence");
     const { challengeStatBoost: base, mythicStatBoost: top } = FULL_SIM;
     assertEqual(red.fights[0].sides[1].members[0].statMult, base.red + (2 * (top.red - base.red)) / 3, "his Team fought with the 2-mythic boost");
 
     const first = await startRun({ trainerData: td, userId: "A", seed: 1, now });
     const lorelei = challengeHeader(first.view, first.step).split("\n");
-    assertEqual(lorelei[1], mythicLine("lorelei", { count: 2, speciesId: GIRATINA }), "Lorelei's fight opens with her line about Giratina");
+    const loreleiSaw = first.view.fights[first.step].mythics;
+    assertTrue(onTeam(loreleiSaw), "Lorelei names one of the Team's mythics");
+    assertTrue(lorelei[1] === mythicLine("lorelei", loreleiSaw) && /Giratina|Mewtwo/.test(lorelei[1]), `and her fight opens with that line: ${lorelei[1]}`);
     assertTrue(!first.ended, "the run goes on to Bruno");
     const second = await continueRun({ trainerData: td, userId: "A", nonce: first.view.nonce ?? first.nonce, step: first.step + 1, slot: null, now });
-    assertEqual(challengeHeader(second.view, second.step).split("\n").at(-1), mythicLine("bruno", { count: 2, speciesId: GIRATINA }),
+    const brunoSaw = second.view.fights[second.step].mythics;
+    assertTrue(onTeam(brunoSaw), "Bruno names one of the Team's mythics too");
+    assertEqual(challengeHeader(second.view, second.step).split("\n").at(-1), mythicLine("bruno", brunoSaw),
       "Bruno's fight, later in the run, still has his own line last");
   } finally {
     delete process.env.FULL_SIM_ENABLED;
