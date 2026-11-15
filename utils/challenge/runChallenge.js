@@ -22,6 +22,7 @@ import { trackProgress } from "../../progression/achievements.js";
 import { ownsTrainer, grantTrainer } from "../../services/assets.js";
 import { grantChallengeAuras } from "../../services/auras.js";
 import { grantItem } from "../../services/inventory.js";
+import { ownsVariant } from "../../services/box.js";
 import { liveEffects } from "../../services/liveEvents.js";
 import { scaleEarned } from "../liveEventRules.js";
 
@@ -155,7 +156,7 @@ const outcomeFight = (userId, f) => ({
   gains: f.gains,
 });
 
-const owns = (user, m) => (user.pokemon?.[m.speciesId]?.[m.variant] ?? 0) > 0;
+const owns = (user, m) => ownsVariant(user, m.speciesId, m.variant);
 
 // Applies a finished challenge: EXP (`totals` per Team slot) to the members
 // the player still owns, then the first-win prize, Badge, and unlock, or the

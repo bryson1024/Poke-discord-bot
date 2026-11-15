@@ -26,11 +26,12 @@ import { getSpecies, getMove } from "../utils/battle/data.js";
 import { getTraining } from "../utils/training.js";
 import { autoMoveset, movesLearned } from "../utils/battle/moveset.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
-import { copyTraining } from "./box.js";
+import { copyTraining, ownsVariant } from "./box.js";
+import { normalizeVariant, specialExtraMoves } from "../utils/specialVariants.js";
 
 export const TEAM_TYPES = Object.freeze(["display", "battle"]);
 export const MAX_MOVES = 4;
-const normV = (variant) => (variant === "shiny" ? "shiny" : "normal");
+const normV = normalizeVariant;
 const lineKey = (id, variant) => `${Number(id)}:${normV(variant)}`;
 export const copyKey = (uid) => `u:${uid}`;
 
@@ -68,6 +69,10 @@ export function learnableMoves(user, speciesId, variant, { level = null, uid = n
     if (at > lv) break;
     if (!seen.has(moveId) && getMove(moveId)) seen.set(moveId, { id: moveId, learnedAt: at, source: "level" });
   }
+  // A Special variant's own moves (the Squirtle Squad Leader's Aqua Jet and Surf), from Lv 1.
+  for (const moveId of specialExtraMoves(normV(variant))) {
+    if (!seen.has(moveId) && getMove(moveId)) seen.set(moveId, { id: moveId, learnedAt: null, source: "special" });
+  }
   for (const moveId of tmMovesFor(user, speciesId, variant, { uid })) {
     if (!seen.has(moveId)) seen.set(moveId, { id: moveId, learnedAt: null, source: "tm" });
   }
@@ -95,7 +100,7 @@ const fail = (error, code) => ({ ok: false, status: 400, error, code });
 export function validateMoveset(user, speciesId, variant, moves, { uid = null } = {}) {
   const id = Number(speciesId);
   if (!Number.isInteger(id) || !getSpecies(id)) return fail("Unknown Pokémon.", "bad_species");
-  if (!(Number(user?.pokemon?.[id]?.[normV(variant)]) > 0)) return fail("You don't own that Pokémon.", "unowned");
+  if (!ownsVariant(user, id, normV(variant))) return fail("You don't own that Pokémon.", "unowned");
   const u = copyUid(user, id, variant, uid);
   if (uid != null && !u) return fail("That Pokémon copy no longer exists. Reload and try again.", "unknown_copy");
   if (!Array.isArray(moves) || moves.length < 1 || moves.length > MAX_MOVES) return fail(`Choose 1–${MAX_MOVES} moves.`, "bad_size");

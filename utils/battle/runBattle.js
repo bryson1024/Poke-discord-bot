@@ -36,7 +36,8 @@ import { rewardsOn, rollBattleShards } from "../../services/megaShards.js";
 import { createRng } from "./rng.js";
 import { toTeamObj } from "../economyRules.js";
 import { slotCopyUid, slotBoxUid } from "../../services/ownership.js";
-import { copyTraining, addCopyExp, copiesOf } from "../../services/box.js";
+import { copyTraining, addCopyExp, copiesOf, ownsVariant } from "../../services/box.js";
+import { specialBattleProfile, specialVariant } from "../specialVariants.js";
 import { liveEffects } from "../../services/liveEvents.js";
 import { expMultiplier } from "../liveEventRules.js";
 import { getSpeciesEntry } from "../speciesCatalog.js";
@@ -74,14 +75,14 @@ export function buildTeam(user, { env = process.env, team = user.displayedPokemo
   const items = battleItems(user, equipmentTeam, { env });
   // Each slot is one copy (docs/adr/0001); normalizeTeam keeps its uid.
   return normalizeTeam(team, 6)
-    .filter((slot) => (user.pokemon?.[slot.id]?.[slot.variant] ?? 0) > 0)
+    .filter((slot) => ownsVariant(user, slot.id, slot.variant))
     .map((slot) => {
       const copyUid = slotBoxUid(user, slot) ?? null;
       const key = copyUid ? `u:${copyUid}` : `${slot.id}:${slot.variant}`; // held items + Mega slot
       const member = {
         speciesId: slot.id,
         variant: slot.variant,
-        name: speciesName(slot.id),
+        name: specialVariant(slot.variant)?.name ?? speciesName(slot.id),
         level: (copyUid && copyTraining(user, copyUid)?.level) ?? getTraining(user, slot.id, slot.variant).level,
       };
       if (copyUid) member.copyUid = copyUid;
@@ -93,7 +94,7 @@ export function buildTeam(user, { env = process.env, team = user.displayedPokemo
       // A slot battling as a Mega never uses a regular item (its Mega Stone fills the slot).
       const item = items.get(key) ?? (copyUid ? items.get(`${slot.id}:${slot.variant}`) : undefined);
       if (item && !(mega?.ok && mega.key === key)) member.item = item;
-      if (!mega?.ok || mega.key !== key) return member;
+      if (!mega?.ok || mega.key !== key) return withSpecialStats(member);
       return { ...member, name: mega.profile.name, baseName: member.name, megaForm: mega.formId, battleProfile: mega.profile };
     });
 }
@@ -103,12 +104,19 @@ export function buildTeam(user, { env = process.env, team = user.displayedPokemo
 // its megaForm id; withMegaStats puts the stats back before a fight.
 export const withoutMegaStats = (team) => team.map(({ battleProfile, ...m }) => m);
 
+// A Special variant (the Squirtle Squad Leader) fights with its catalog base
+// stats and types; speciesId stays the species', so EXP and Levels don't change.
+function withSpecialStats(m) {
+  const profile = specialBattleProfile(m.variant);
+  return profile ? { ...m, battleProfile: profile } : m;
+}
+
 // Saved fighters made ready to fight: each Mega slot gets its battle profile
 // again. A form no longer battle-ready (Mega battles switched off since it was
 // saved, say) fights as its base form, failing closed like buildTeam.
 export function withMegaStats(members, { env = process.env } = {}) {
   return members.map((m) => {
-    if (!m.megaForm) return m;
+    if (!m.megaForm) return withSpecialStats(m);
     if (megaBattleEligibility(m.megaForm, { env }).battleReady) return { ...m, battleProfile: megaBattleProfile(m.megaForm) };
     const { megaForm, baseName, battleProfile, ...base } = m;
     return { ...base, name: baseName ?? base.name };

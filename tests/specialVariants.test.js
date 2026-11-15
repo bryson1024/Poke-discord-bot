@@ -26,6 +26,14 @@ import * as battleTeam from "../services/battleTeam.js";
 import { prepareShowcaseSelection, normalizeShowcase } from "../services/showcaseTeam.js";
 import { parseTeamCopy, applyTeamCopy } from "../services/teamCopy.js";
 import { normalizeEquipment, teamSlots } from "../services/heldItems.js";
+import { buildTeam, withoutMegaStats, withMegaStats } from "../utils/battle/runBattle.js";
+import { buildMon } from "../utils/battle/sim.js";
+import { computeStats } from "../utils/battle/stats.js";
+import { learnableMoves, chosenMoves, saveMoveset } from "../services/movesets.js";
+import * as battleRender from "../utils/battle/render.js";
+import { runChallenge } from "../utils/challenge/runChallenge.js";
+import { createNewUser } from "../utils/userSchema.js";
+import { expMembers } from "../utils/render/expCard.js";
 
 const pokemonData = JSON.parse(readFileSync(new URL("../pokemonData.json", import.meta.url), "utf8"));
 const economy = {
@@ -310,6 +318,64 @@ section("teams");
   assertEqual(teamSlots(u, "display").map((s) => s.variant), ["normal", "squad-leader"], "held-item team slots keep the Leader beside plain Squirtle");
   normalizeEquipment(u);
   assertEqual(u.equipment?.teams?.display?.[`u:${leader}`], "leftovers", "a held item on the Leader survives normalizeEquipment");
+}
+
+section("battle");
+{
+  const { u, p30, leader } = squad();
+  u.displayedPokemon = [{ id: 7, variant: "squad-leader", uid: leader }, { id: 7, variant: "normal", uid: p30 }];
+  const team = buildTeam(u, { env: {} });
+  const m = team[0];
+  assertEqual([m?.speciesId, m?.variant, m?.name, m?.level, m?.copyUid], [7, "squad-leader", "Squirtle Squad Leader", 25, leader], "buildTeam builds the Leader as itself");
+  assertEqual(m?.battleProfile?.baseStats, LEADER_STATS, "the Leader fights with its catalog base stats");
+  assertEqual(buildMon(m).atk, computeStats(LEADER_STATS, 25).atk, "buildMon uses the Leader's stats");
+  assertEqual(team[1]?.battleProfile, undefined, "plain Squirtle has no battle profile");
+  const saved = withoutMegaStats(team);
+  assertEqual(withMegaStats(saved)[0]?.battleProfile?.baseStats, LEADER_STATS, "withMegaStats restores the Leader's profile on a saved team");
+}
+{
+  const u = { cc: 0 };
+  const leader = grantSpecial(u, "squad-leader").uid;
+  u.displayedPokemon = [{ id: 7, variant: "squad-leader", uid: leader }];
+  assertEqual(buildTeam(u, { env: {} }).map((m) => m.copyUid), [leader], "buildTeam keeps a Leader-only team");
+}
+{
+  const { u, p30, leader } = squad();
+  const ids = (list) => list.map((x) => x.id);
+  const leaderMoves = learnableMoves(u, 7, "squad-leader", { uid: leader });
+  assertEqual(leaderMoves.filter((x) => x.source === "special").map((x) => x.id).sort(), ["aquajet", "surf"], "the Leader can learn Aqua Jet and Surf");
+  const plainMoves = learnableMoves(u, 7, "normal", { uid: p30 });
+  assertTrue(!plainMoves.some((x) => x.source === "special") && !ids(plainMoves).includes("aquajet"), "a plain Squirtle never gets the Leader's moves");
+  const first = getSpecies(7).levelMoves[0][1];
+  const saved = saveMoveset(u, { team: "display", pokeId: 7, variant: "squad-leader", moves: ["surf", first], uid: leader });
+  assertTrue(saved.ok, "a moveset with Surf saves for the Leader");
+  assertEqual(chosenMoves(u, "display", 7, "squad-leader", { uid: leader }), ["surf", first], "chosenMoves keeps Surf for the Leader");
+  assertEqual(saveMoveset(u, { team: "display", pokeId: 7, variant: "normal", moves: ["surf"], uid: p30 }).code, "not_learned", "a plain Squirtle can't equip Surf");
+}
+{
+  const ref = battleRender.spriteRef;
+  assertEqual(ref?.({ speciesId: 7, variant: "squad-leader" }, false), { dir: "special/grayscale", file: "squad-leader" }, "special fainted sprite path");
+  assertEqual(ref?.({ speciesId: 7, variant: "squad-leader" }, true), { dir: "special/normal", file: "squad-leader" }, "special live sprite path");
+  assertEqual(ref?.({ speciesId: 7, variant: "squad-member" }, true), { dir: "special/normal", file: "squad-member" }, "a Squad member foe uses its own look");
+  assertEqual(ref?.({ speciesId: 7, variant: "squad-member" }, false), { dir: "special/grayscale", file: "squad-member" }, "a fainted Squad member is grayscale");
+  assertEqual(ref?.({ speciesId: 7, variant: "shiny" }, true), { dir: "shiny", file: 7 }, "a shiny member keeps its folder");
+  assertEqual(ref?.({ speciesId: 7, variant: "normal" }, false), { dir: "grayscale", file: 7 }, "a fainted plain member is grayscale");
+  assertEqual(ref?.({ speciesId: 9, variant: "normal", megaForm: "blastoise-mega" }, true), { dir: "mega/normal", file: "blastoise-mega" }, "a Mega keeps its Mega sprite path");
+}
+{
+  // Challenges: the Leader on the Casual team earns EXP like any member.
+  const u = createNewUser("A", "Trainer A");
+  const leader = grantSpecial(u, "squad-leader").uid;
+  u.displayedPokemon = [{ id: 7, variant: "squad-leader", uid: leader }];
+  const before = u.box[leader].exp;
+  const r = runChallenge({ trainerData: { A: u }, userId: "A", key: "brock", seed: 1, now: new Date("2026-11-09T12:00:00Z") });
+  assertTrue(r.ok, "the Leader can take on a Challenge");
+  assertTrue(u.box[leader].exp > before, "the Leader earns Challenge EXP");
+}
+{
+  const { u } = squad();
+  const [row] = expMembers([{ key: "7:squad-leader", name: "Squirtle Squad Leader", fromLevel: 25, toLevel: 26, gained: 100 }], u);
+  assertEqual([row.name, row.variant, row.shiny, typeof row.expFrac], ["Squirtle Squad Leader", "squad-leader", false, "number"], "the EXP card shows the Leader by name with its own EXP bar");
 }
 
 finish();

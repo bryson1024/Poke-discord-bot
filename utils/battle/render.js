@@ -22,6 +22,7 @@ import { trainerLight } from "../render/auraArt.js";
 import { cardTrainerFx } from "../render/trainerTier.js";
 import { typeStyle, COLOR as TOKENS } from "../render/tokens.js";
 import { isMegaId, megaSpriteRecord } from "../megas.js";
+import { isSpriteVariant } from "../specialVariants.js";
 import { encodeFrames } from "../render/gif.js";
 import { unionBox, pokemonLoopFit, loopPlan, fitLoop, spriteTime, STEP_MS, MAX_GIF_BYTES } from "../render/spriteLoops.js";
 
@@ -131,8 +132,23 @@ export async function loadSprite(folder, id) {
  * a sprite), never the base form's art.
  */
 export function loadAnimatedSprite(id, folder) {
+  // A Special variant as the folder (the Squirtle Squad Leader): its own live sprite.
+  if (isSpriteVariant(folder)) return loadSprite("special/normal", folder);
   if (!isMegaId(id)) return loadSprite(folder, id);
   return megaSpriteRecord(id)?.[folder]?.file ? loadSprite(`mega/${folder}`, id) : Promise.resolve(null);
+}
+
+/**
+ * Where a battle member's sprite lives under public/sprites/pokemon:
+ * { dir, file }. alive = its own colors, else the grayscale twin. A Special
+ * variant (the Leader, or a Squad member's look) has its own sprites; a Mega
+ * reads mega/<variant|grayscale>/<form>; everything else <variant|grayscale>/<species>.
+ */
+export function spriteRef(member, alive) {
+  if (isSpriteVariant(member.variant)) return { dir: `special/${alive ? "normal" : "grayscale"}`, file: member.variant };
+  const folder = alive ? member.variant : "grayscale";
+  if (member.megaForm) return { dir: `mega/${folder}`, file: member.megaForm };
+  return { dir: folder, file: member.speciesId };
 }
 
 // Plays one sprite through one image: returns a canvas showing the frame at
@@ -437,20 +453,19 @@ export async function renderBattleFrame({ sides, hpBefore, events = [], badge = 
   const fx = cardTrainerFx(env);
   const fitted = pokemonLoopFit(env);
   const clock = fitted ? clockMs : 0;
-  const load = (s, i, folder) => {
-    const m = sides[s].members[i];
-    // A Mega battles with its own sprite (loadAnimatedSprite: mega/<variant|grayscale>/<form>.gif).
-    const id = m.megaForm ?? m.speciesId;
-    const key = m.megaForm ? `mega/${folder}/${id}` : `${folder}/${id}`; // the file's path under sprites/pokemon
-    if (!sprites.has(key)) sprites.set(key, loadAnimatedSprite(id, folder));
+  const load = (s, i, alive) => {
+    const { dir, file } = spriteRef(sides[s].members[i], alive);
+    const key = `${dir}/${file}`; // the file's path under sprites/pokemon
+    // A Mega goes through loadAnimatedSprite, which reads only manifest-listed Mega sprites.
+    if (!sprites.has(key)) sprites.set(key, dir.startsWith("mega/") ? loadAnimatedSprite(file, dir.slice("mega/".length)) : loadSprite(dir, file));
     return sprites.get(key);
   };
   const live = await Promise.all(sides.map((side, s) => Promise.all(side.members.map((m, i) =>
-    load(s, i, hpBefore[s][i] > 0 ? m.variant : "grayscale")))));
+    load(s, i, hpBefore[s][i] > 0)))));
   const faints = (s, i) => events.some((e) =>
     (e.fainted && 1 - e.side === s && e.targetSlot === i) || (e.userFainted && e.side === s && e.slot === i));
   const gray = await Promise.all(sides.map((side, s) => Promise.all(side.members.map((m, i) =>
-    (hpBefore[s][i] > 0 && faints(s, i) ? load(s, i, "grayscale") : null)))));
+    (hpBefore[s][i] > 0 && faints(s, i) ? load(s, i, false) : null)))));
   // The fighting pair: each side's first Pokémon still standing (as in the sim).
   const active = winnerSide === null ? hpBefore.map((row) => row.findIndex((f) => f > 0)) : [-1, -1];
   const cached = (key, load) => {
