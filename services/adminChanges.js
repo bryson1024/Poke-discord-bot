@@ -26,8 +26,9 @@
 
 import { getSpeciesEntry, isAcquirable } from "../utils/speciesCatalog.js";
 import { trainingKey, getTraining, expForLevel, rollCatchLevel } from "../utils/training.js";
-import { canRemoveCopies, removeCopies, plainCount } from "./ownership.js";
-import { addCopy, copiesOf, syncLine, normalizeBox } from "./box.js";
+import { canRemoveCopies, removeCopies, plainCount, countOf } from "./ownership.js";
+import { addCopy, copiesOf, syncLine, normalizeBox, slotsHolding } from "./box.js";
+import { isSpecialVariant, normalizeVariant, specialVariant, VARIANT_KEYS } from "../utils/specialVariants.js";
 import { LEVEL_CAP } from "../utils/battle/tuning.js";
 import { getCatalogItem, isAdminGrantable } from "../catalog/items.js";
 import { adminGrantItem, consumeItem, getQuantity, MAX_QUANTITY_PER_OP } from "./inventory.js";
@@ -57,9 +58,9 @@ const fail = (error, extra = {}) => ({ ok: false, error, ...extra });
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const fmt = (n) => Number(n).toLocaleString("en-US");
 const clone = (o) => JSON.parse(JSON.stringify(o ?? {}));
-const variantOf = (v) => (v === "shiny" ? "shiny" : "normal");
-const variantLabel = (v) => (v === "shiny" ? "shiny " : "");
 export const speciesLabel = (id) => getSpeciesEntry(id)?.name ?? `#${id}`;
+// "shiny Squirtle", or a Special variant's own name (the Squirtle Squad Leader).
+const pokemonName = (id, v) => (isSpecialVariant(v) ? specialVariant(v).name : `${v === "shiny" ? "shiny " : ""}${speciesLabel(id)}`);
 
 function parseAmount(v) {
   const n = typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v.trim()) : v;
@@ -111,7 +112,9 @@ export function parseChange(raw, ctx = {}) {
     if (!s.ok) return s;
     const a = parseAmount(raw.amount);
     if (!a.ok) return a;
-    const change = { kind, op, speciesId: s.value, variant: variantOf(raw.variant), amount: a.value };
+    // Admin tools can remove a Special variant (the Squirtle Squad Leader) but never grant one.
+    if (op === "add" && isSpecialVariant(raw.variant)) return fail("Special variants can't be granted.");
+    const change = { kind, op, speciesId: s.value, variant: normalizeVariant(raw.variant), amount: a.value };
     // Remove one named copy (docs/adr/0001): uid, amount 1.
     if (op === "remove" && raw.uid != null) {
       if (!COPY_UID.test(String(raw.uid)) || a.value !== 1) return fail("Unknown copy.");
@@ -149,7 +152,7 @@ export function parseChange(raw, ctx = {}) {
     const l = parseLevel(raw.level);
     if (!l.ok) return l;
     if (raw.uid != null && !COPY_UID.test(String(raw.uid))) return fail("Unknown copy.");
-    return { ok: true, change: { kind, speciesId: s.value, variant: variantOf(raw.variant), level: l.value, ...(raw.uid != null ? { uid: String(raw.uid) } : {}) } };
+    return { ok: true, change: { kind, speciesId: s.value, variant: normalizeVariant(raw.variant), level: l.value, ...(raw.uid != null ? { uid: String(raw.uid) } : {}) } };
   }
   if (kind === "cooldown") {
     const list = Array.isArray(raw.cooldowns) ? [...new Set(raw.cooldowns.map(String))] : [];
@@ -203,10 +206,44 @@ function clearTeamSlots(user, speciesId, variant) {
   }
 }
 
+/**
+ * The admin player view's Pokémon rows: one per species + Variant owned, with
+ * each copy (docs/adr/0001). A Special variant (the Squirtle Squad Leader)
+ * gets its own row, so it can be found and removed.
+ */
+const TEAM_LABEL = { displayedPokemon: "Casual", battleTeam: "Ranked", showcaseTeam: "Showcase" };
+export function pokemonRows(user) {
+  const rows = [];
+  for (const sid of Object.keys(user?.pokemon || {})) {
+    const id = Number(sid);
+    if (!Number.isInteger(id)) continue;
+    const e = getSpeciesEntry(id);
+    for (const variant of VARIANT_KEYS) {
+      const n = countOf(user, id, variant);
+      if (n <= 0) continue;
+      rows.push({
+        id,
+        variant,
+        name: isSpecialVariant(variant) ? specialVariant(variant).name : e?.name ?? speciesLabel(id),
+        tier: e?.tier ?? "common",
+        count: n,
+        level: getTraining(user, id, variant).level,
+        teams: teamSlotsOf(user, id, variant).map((s) => `${s.label} ${s.slot}`),
+        copies: copiesOf(user, id, variant).map((c) => ({
+          uid: c.uid, level: c.level, trained: c.trained,
+          teams: slotsHolding(user, c.uid).map((s) => `${TEAM_LABEL[s.field]} ${s.index + 1}`),
+        })),
+      });
+    }
+  }
+  return rows.sort((a, b) => a.id - b.id || VARIANT_KEYS.indexOf(a.variant) - VARIANT_KEYS.indexOf(b.variant));
+}
+
 // ----------------------------------------------------------
 // Apply
 // ----------------------------------------------------------
-const count = (user, id, variant) => num(user?.pokemon?.[id]?.[variant]);
+// Copies of exactly this Variant: the derived normal count also holds Special copies (services/ownership.js).
+const count = countOf;
 
 /**
  * Apply one change to a user record, in place. All-or-nothing: on failure
@@ -261,7 +298,7 @@ export function applyChange(user, change, ctx = {}) {
 
     case "pokemon": {
       const { speciesId: id, variant, amount } = change;
-      const name = `${variantLabel(variant)}${speciesLabel(id)}`;
+      const name = pokemonName(id, variant);
       const before = count(user, id, variant);
       if (change.op === "add") {
         if (!isAcquirable(id) && !ctx.allowUnreleased) {
@@ -346,7 +383,7 @@ export function applyChange(user, change, ctx = {}) {
 
     case "level": {
       const { speciesId: id, variant, level } = change;
-      const name = `${variantLabel(variant)}${speciesLabel(id)}`;
+      const name = pokemonName(id, variant);
       if (count(user, id, variant) <= 0) return fail(`They don't own ${name}.`);
       // One copy: the one named by uid, else their best (the Level shown for the line).
       normalizeBox(user);

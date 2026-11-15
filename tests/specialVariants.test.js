@@ -48,6 +48,8 @@ import { pokemonSprite as recordSprite } from "../public/battlerecords/records.j
 import * as publicSprites from "../public/spriteconfig.js";
 import { levelsForUser } from "../utils/training.js";
 import { powersFromLevels } from "../utils/battle/power.js";
+import * as adminChanges from "../services/adminChanges.js";
+import { validateMoveset } from "../services/movesets.js";
 
 const pokemonData = JSON.parse(readFileSync(new URL("../pokemonData.json", import.meta.url), "utf8"));
 const economy = {
@@ -481,6 +483,89 @@ section("dashboard");
   assertEqual(publicSprites.SPECIAL_NAMES, names, "the dashboard's Special variant names match the catalog");
   assertEqual(publicSprites.specialSprite?.("squad-leader", "grayscale"), "/public/sprites/pokemon/special/grayscale/squad-leader.gif", "specialSprite builds the grayscale path");
   assertEqual([publicSprites.rowVariant?.(["c", 7, 0, 1, 0, 0, 0, 0, "squad-leader"]), publicSprites.rowVariant?.(["c", 7, 1, 1, 0, 0, 0, 0, null]), publicSprites.rowVariant?.(["c", 7, 0, 1, 0, 0, 0, 0])], ["squad-leader", "shiny", "normal"], "rowVariant reads a copy row's Variant (older 8-field rows too)");
+}
+
+section("final review");
+{
+  // A Leader-only player never owns a plain Squirtle: no ghost slot, team save or moveset.
+  const u = {};
+  grantSpecial(u, "squad-leader");
+  normalizeBox(u);
+  u.displayedPokemon = [{ id: 7, variant: "normal" }];
+  u.battleTeam = [{ id: 7, variant: "normal" }];
+  normalizeDisplayedTeam(u);
+  battleTeam.normalizeBattleTeam(u);
+  assertEqual([u.displayedPokemon, u.battleTeam], [[], []], "a plain Squirtle slot with only the Leader owned is removed at load");
+  assertEqual(battleTeam.prepareBattleTeamSelection(u, [{ id: 7, variant: "normal" }]).code, "unowned", "a Ranked save of a plain Squirtle the player doesn't own is refused");
+  assertEqual(prepareTeamSelection(u, [{ id: 7, variant: "normal" }]).code, "unowned", "so is a Casual save");
+  assertEqual(buildTeam(u, { env: {}, team: [{ id: 7, variant: "normal" }] }), [], "buildTeam fields no plain Squirtle");
+  assertEqual(validateMoveset(u, 7, "normal", [getSpecies(7).levelMoves[0][1]]).code, "unowned", "and no plain Squirtle moveset saves");
+}
+{
+  // Rollback round trip: what the previous release leaves behind (it reads every Variant but shiny as normal).
+  // 1. Its shared training record follows its best "normal" copy, the Leader: no free EXP for a plain copy.
+  const u = { cc: 0 };
+  const p10 = plain(u, 10);
+  const { uid: leader } = grantSpecial(u, "squad-leader");
+  u.box[leader].exp = expForLevel(80);
+  u.training["7:normal"] = { exp: expForLevel(80) };
+  normalizeBox(u);
+  assertEqual([u.box[p10].exp, u.box[leader].exp], [expForLevel(10), expForLevel(80)], "a rollback's shared Level never lifts a plain copy to the Leader's EXP");
+}
+{
+  // 2. It saves the Leader's slot as { variant: "normal", uid: <Leader> }: Casual and Showcase get the Leader back, Ranked doesn't.
+  const { u, p30, leader } = squad();
+  const coerced = () => [{ id: 7, variant: "normal", uid: leader }];
+  u.displayedPokemon = coerced();
+  u.showcaseTeam = coerced();
+  u.battleTeam = coerced();
+  normalizeDisplayedTeam(u);
+  battleTeam.normalizeBattleTeam(u);
+  normalizeBox(u);
+  normalizeShowcase(u);
+  assertEqual(u.displayedPokemon.map((s) => [s.variant, s.uid]), [["squad-leader", leader]], "the Casual team gets the Leader back after a rollback");
+  assertEqual(u.showcaseTeam.map((s) => [s.variant, s.uid]), [["squad-leader", leader]], "so does the Showcase");
+  assertEqual(u.battleTeam.map((s) => [s.variant, s.uid]), [["normal", p30]], "the Ranked slot becomes a plain Squirtle");
+  const only = {};
+  const { uid: solo } = grantSpecial(only, "squad-leader");
+  only.displayedPokemon = [{ id: 7, variant: "normal", uid: solo }];
+  only.battleTeam = [{ id: 7, variant: "normal", uid: solo }];
+  normalizeDisplayedTeam(only);
+  battleTeam.normalizeBattleTeam(only);
+  normalizeBox(only);
+  assertEqual([only.displayedPokemon.map((s) => [s.variant, s.uid]), only.battleTeam], [[["squad-leader", solo]], []], "Leader only: back on the Casual team, off the Ranked team");
+}
+{
+  // 3. A shiny craft of the Leader there leaves { variant, shiny: true }: a plain shiny Squirtle now, never a second copy.
+  const u = { cc: 0, pokemon: { 7: { normal: 0, shiny: 1 } } };
+  u.box = { c_AAAAAAAAAA: { id: 7, variant: "squad-leader", shiny: true, exp: expForLevel(25) } };
+  normalizeBox(u);
+  assertEqual([Object.keys(u.box).length, u.box.c_AAAAAAAAAA?.shiny, "variant" in (u.box.c_AAAAAAAAAA ?? {}), u.pokemon[7]?.shiny], [1, true, false, 1], "a Leader crafted shiny under the previous release is one shiny Squirtle");
+  // 4. An evolution there leaves { id: 8, variant }: a plain Wartortle, and a win can grant a new Leader.
+  const w = { cc: 0, pokemon: { 8: { normal: 1, shiny: 0 } } };
+  w.box = { c_BBBBBBBBBB: { id: 8, variant: "squad-leader", exp: expForLevel(25) } };
+  normalizeBox(w);
+  assertEqual(["variant" in w.box.c_BBBBBBBBBB, Object.keys(w.box).length], [false, 1], "a Leader evolved under the previous release is a plain Wartortle");
+  assertEqual(grantSpecial(w, "squad-leader").granted, true, "and the player can win a Leader again");
+}
+{
+  // Admin tools can remove the Leader (spec), never grant it.
+  const { u, leader } = squad();
+  u.displayedPokemon = [{ id: 7, variant: "squad-leader", uid: leader }];
+  const parsed = adminChanges.parseChange({ kind: "pokemon", op: "remove", speciesId: 7, variant: "squad-leader", amount: 1 });
+  assertEqual(parsed.change?.variant, "squad-leader", "an admin removal can name the Leader");
+  const r = adminChanges.applyChange(u, parsed.change);
+  assertTrue(r.ok && !u.box[leader], "the admin removal takes the Leader");
+  assertEqual([u.displayedPokemon.length, u.pokemon[7]?.normal], [0, 2], "its Casual slot clears; both plain Squirtle stay");
+  assertTrue(/Squirtle Squad Leader/.test(r.summary ?? ""), "the summary names the Leader");
+  assertEqual(adminChanges.parseChange({ kind: "pokemon", op: "add", speciesId: 7, variant: "squad-leader", amount: 1 }).ok, false, "an admin can't grant a Special variant");
+  const only = {};
+  grantSpecial(only, "squad-leader");
+  normalizeBox(only);
+  const plainRemove = adminChanges.applyChange(only, adminChanges.parseChange({ kind: "pokemon", op: "remove", speciesId: 7, variant: "normal", amount: 1 }).change);
+  assertTrue(!plainRemove.ok && /They have 0/.test(plainRemove.error), "removing a plain Squirtle from a Leader-only player says they have none");
+  const rows = adminChanges.pokemonRows?.(squad().u) ?? [];
+  assertEqual(rows.map((x) => [x.variant, x.name, x.count, x.copies.length]), [["normal", "Squirtle", 2, 2], ["squad-leader", "Squirtle Squad Leader", 1, 1]], "the admin player view lists the Leader on its own row");
 }
 
 finish();

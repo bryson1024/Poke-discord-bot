@@ -48,12 +48,12 @@ const fail = (code, error, extra = {}) => ({ ok: false, code, error, ...extra })
 // A Special variant copy (the Squirtle Squad Leader) is kept for good: no
 // player-facing removal or transform ever takes it (docs/adr/0002-special-variants.md).
 const keptForGood = (v, action) => fail("special", `The ${specialVariant(v).name} is kept for good: it can't be ${action}.`);
-const specialsOf = (user, id) => Object.values(user?.box ?? {}).filter((r) => Number(r?.id) === Number(id) && isSpecialVariant(r?.variant));
+const specialsOf = (user, id) => Object.values(user?.box ?? {}).filter((r) => Number(r?.id) === Number(id) && isSpecialVariant(variantOf(r)));
 
 // Copies of exactly id:variant. The derived normal count includes Special
 // copies (they count as normal for older readers), so they're taken back out.
-const countOf = (user, id, variant) => {
-  if (isSpecialVariant(variant)) return specialsOf(user, id).filter((r) => r.variant === variant).length;
+export const countOf = (user, id, variant) => {
+  if (isSpecialVariant(variant)) return specialsOf(user, id).filter((r) => variantOf(r) === variant).length;
   const n = Number(user?.pokemon?.[id]?.[variant]);
   const counted = Number.isFinite(n) && n > 0 ? n : 0;
   return Math.max(0, variant === "normal" ? counted - specialsOf(user, id).length : counted);

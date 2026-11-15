@@ -35,15 +35,14 @@ import { getRank } from "../utils/rankSystem.js";
 import { readEvents } from "../utils/eventLog.js";
 import { appendAudit as defaultAppendAudit, readAudit as defaultReadAudit } from "../utils/adminAudit.js";
 import { createAdminHandlers } from "../services/adminApi.js";
-import { COOLDOWNS, cooldownState, lastActiveOf, teamSlotsOf, speciesLabel } from "../services/adminChanges.js";
+import { COOLDOWNS, cooldownState, lastActiveOf, pokemonRows } from "../services/adminChanges.js";
 import { getSpeciesEntry, allSpeciesIds, isAcquirable } from "../utils/speciesCatalog.js";
-import { getTraining } from "../utils/training.js";
 import { listCatalog, isAdminGrantable, CATEGORIES } from "../catalog/items.js";
 import { listInventory, validateHoldableItem } from "../services/inventory.js";
 import { normalizeTrainers } from "../services/assets.js";
 import { loadTrainerSprites } from "../utils/dataLoader.js";
 import { rankedRecord } from "../utils/battle/rewards.js";
-import { copiesOf, slotsHolding } from "../services/box.js";
+import { copiesOf } from "../services/box.js";
 import { mountLiveEventRoutes } from "./liveEventsAdmin.js";
 
 const toNumber = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -211,31 +210,7 @@ export function mountAdminDashboard(app, deps) {
     if (!user) return res.status(404).json({ ok: false, error: "Player not found." });
     const tc = await getTrainerCatalog();
 
-    const pokemon = [];
-    for (const [sid, counts] of Object.entries(user.pokemon || {})) {
-      const n = Number(sid);
-      if (!Number.isInteger(n)) continue;
-      const e = getSpeciesEntry(n);
-      for (const variant of ["normal", "shiny"]) {
-        const count = toNumber(counts?.[variant]);
-        if (count <= 0) continue;
-        pokemon.push({
-          id: n,
-          variant,
-          name: e?.name ?? speciesLabel(n),
-          tier: e?.tier ?? "common",
-          count,
-          level: getTraining(user, n, variant).level,
-          teams: teamSlotsOf(user, n, variant).map((s) => `${s.label} ${s.slot}`),
-          // Every copy (docs/adr/0001): its Level, TM training and team slots.
-          copies: copiesOf(user, n, variant).map((c) => ({
-            uid: c.uid, level: c.level, trained: c.trained,
-            teams: slotsHolding(user, c.uid).map((s) => ({ displayedPokemon: "Casual", battleTeam: "Ranked", showcaseTeam: "Showcase" }[s.field] + ` ${s.index + 1}`)),
-          })),
-        });
-      }
-    }
-    pokemon.sort((a, b) => a.id - b.id || Number(a.variant === "shiny") - Number(b.variant === "shiny"));
+    const pokemon = pokemonRows(user); // every copy (docs/adr/0001), the Squirtle Squad Leader on its own row
 
     const items = listInventory(user).map((r) => ({ id: r.id, name: r.name, category: r.categoryLabel, rarity: r.rarity, quantity: r.quantity, icon: r.icon, known: r.known }));
     const displayed = String(user.displayedTrainer ?? "").toLowerCase();

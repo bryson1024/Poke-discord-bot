@@ -33,8 +33,7 @@ import { getMega, megaFormGate, megaBattleEligibility, megaBattleProfile, MEGA_I
 import { unlockedForms, megaLineKey } from "./megaUnlocks.js";
 import { isMegaCapabilityEnabled } from "../config/features.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
-import { ownsVariant } from "./box.js";
-import { normalizeVariant } from "../utils/specialVariants.js";
+import { ownsVariant, slotVariant } from "./box.js";
 
 const fail = (status, error, code) => ({ ok: false, status, error, code });
 
@@ -68,7 +67,7 @@ export function normalizeDisplayedTeam(user) {
   // Normalize + remove ghosts (must own that specific variant)
   user.displayedPokemon = user.displayedPokemon
     .map((t) => {
-      const slot = { id: Number(t?.id), variant: normalizeVariant(t?.variant) };
+      const slot = { id: Number(t?.id), variant: slotVariant(user, t) }; // the Leader's slot as the previous release saved it gets its Variant back
       const mega = megaFieldOf(t);
       // Any copy of the line (docs/adr/0001); trained copies are copies too.
       const uid = slotBoxUid(user, { ...slot, uid: t?.uid }) ?? slotCopyUid(user, { ...slot, uid: t?.uid });

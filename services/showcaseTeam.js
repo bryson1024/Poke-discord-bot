@@ -15,7 +15,7 @@
 // ==========================================================
 
 import { megaFieldOf, megaFitsSlot } from "./megaTeam.js";
-import { copiesOf, copyOf, variantOf, ownsVariant } from "./box.js";
+import { copiesOf, copyOf, variantOf, ownsVariant, slotVariant } from "./box.js";
 import { normalizeVariant } from "../utils/specialVariants.js";
 import { getMega, megaFormGate } from "../utils/megas.js";
 import { isMegaCapabilityEnabled } from "../config/features.js";
@@ -40,8 +40,8 @@ function cleanSlots(user, raw) {
     if (out.length >= SHOWCASE_MAX) break;
     const t = toTeamObj(entry);
     if (!t) continue;
-    const slot = { id: Number(t.id), variant: normV(t.variant) };
     const wanted = entry && typeof entry === "object" ? entry.uid : undefined;
+    const slot = { id: Number(t.id), variant: slotVariant(user, { ...t, uid: wanted }) }; // as normalizeDisplayedTeam
     const rec = copyOf(user, wanted);
     let uid = rec && lineOf(rec) === `${slot.id}:${slot.variant}` && !used.has(wanted) ? wanted : null;
     uid ??= freeCopy(user, slot.id, slot.variant, used);

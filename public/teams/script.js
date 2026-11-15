@@ -342,6 +342,7 @@ async function copyFrom(target, source = SOURCES[target].find((t) => team(t).len
     const s = clone(s0);
     if (!isShowcase(target)) {
       if (lines.has(keyOf(s))) { dropped.push({ s, why: "already on the team" }); continue; }
+      if (target === "battle" && isSpecial(s.variant)) { dropped.push({ s, why: "can't join the Ranked team" }); continue; }
       if (target === "battle" && isMythic(s.id) && mythics++ >= 1) { dropped.push({ s, why: "one mythic-tier Pokémon per Ranked team" }); continue; }
       if (s.mega && megas++ >= 1) delete s.mega; // one Mega per team: the rest come as their base form
       lines.add(keyOf(s)); // each Pokémon once on Casual and Ranked
@@ -353,7 +354,7 @@ async function copyFrom(target, source = SOURCES[target].find((t) => team(t).len
   const msg = [
     current?.length ? `This replaces your ${LABEL[target]} (${current.length} Pokémon). ${movesNote}` : `This fills your ${LABEL[target]}. ${movesNote}`,
     isDirty(target) ? `Your unsaved changes to the ${LABEL[target]} will be replaced.` : "",
-    dropped.length ? `Left out: ${dropped.map((d) => `${species(d.s.id).name} (${d.why})`).join(", ")}.` : "",
+    dropped.length ? `Left out: ${dropped.map((d) => `${nameOf(d.s)} (${d.why})`).join(", ")}.` : "",
     "Nothing changes until you press Save.",
   ].filter(Boolean);
   const ok = await confirmDialog({

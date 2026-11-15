@@ -7,7 +7,7 @@
 // ==========================================================
 
 import fs from "fs";
-import { addCopy } from "../services/box.js";
+import { addCopy, variantOf } from "../services/box.js";
 import { isSpecialVariant } from "./specialVariants.js";
 import {
   LEVEL_CAP, CATCH_RANGES, CATCH_SKEW, CATCH_TAIL_CHANCE, DUPLICATE_LEVEL_SHARE,
@@ -103,7 +103,8 @@ export function levelsForUser(user) {
   }
   // A Special copy (the Squirtle Squad Leader) is its own line; its count sits under normal.
   for (const rec of Object.values(user.box ?? {})) {
-    if (isSpecialVariant(rec?.variant)) out[trainingKey(rec.id, rec.variant)] = getTraining(user, rec.id, rec.variant).level;
+    const v = variantOf(rec);
+    if (isSpecialVariant(v)) out[trainingKey(rec.id, v)] = getTraining(user, rec.id, v).level;
   }
   return out;
 }

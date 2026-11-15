@@ -35,7 +35,11 @@ export const DEX_SHINY = 2;
 const VARIANTS = ["normal", "shiny"]; // derived-count keys
 const maxExp = () => expForLevel(LEVEL_CAP);
 /** A copy's Variant: its Special variant, else shiny or normal. */
-export const variantOf = (rec) => (isSpecialVariant(rec?.variant) ? rec.variant : rec?.shiny ? "shiny" : "normal");
+// A Special key counts only on a non-shiny copy of that variant's species: the
+// previous release can make a Leader shiny or evolve it and leaves the key
+// behind (normalizeBox then drops it; docs/adr/0002).
+const isSpecialRecord = (rec) => isSpecialVariant(rec?.variant) && !rec.shiny && Number(rec.id) === specialVariant(rec.variant).species;
+export const variantOf = (rec) => (isSpecialRecord(rec) ? rec.variant : rec?.shiny ? "shiny" : "normal");
 const normV = normalizeVariant;
 const bitOf = (variant) => (variant === "shiny" ? DEX_SHINY : DEX_NORMAL);
 /** Copies of a species counted under one derived-count key (normal counts Special copies too). */
@@ -155,14 +159,32 @@ function describe(user, uid, rec) {
 export const isTrained = (user, uid) => !!user?.customPokemon?.[uid] && !user.customPokemon[uid].suspended;
 
 /** True when this copy is a Special variant (kept for good: never auto-picked, donated, fed, gifted or transformed). */
-export const isSpecialCopy = (user, uid) => isSpecialVariant(copyOf(user, uid)?.variant);
+export const isSpecialCopy = (user, uid) => isSpecialVariant(variantOf(copyOf(user, uid)));
 
 /** How many copies of exactly this species + Variant the player owns (read from the box). */
 export const ownedCount = (user, id, variant) => copiesOf(user, id, variant).length;
 
-/** Owns this exact Variant: a Special one is read from the box (its derived count sits under normal). */
-export const ownsVariant = (user, id, variant) =>
-  (isSpecialVariant(variant) ? ownedCount(user, id, variant) : Number(user?.pokemon?.[id]?.[variant]) || 0) > 0;
+/**
+ * Owns this exact Variant. A Special one is read from the box; the derived
+ * normal count also holds Special copies, so they're taken back out of it.
+ */
+export function ownsVariant(user, id, variant) {
+  if (isSpecialVariant(variant)) return ownedCount(user, id, variant) > 0;
+  const n = Number(user?.pokemon?.[id]?.[variant]) || 0;
+  const specials = variant === "normal" ? Object.values(user?.box ?? {}).filter((r) => Number(r?.id) === Number(id) && isSpecialVariant(variantOf(r))).length : 0;
+  return n - specials > 0;
+}
+
+/**
+ * A load-time team slot's Variant. The previous release saves the Leader's
+ * slot as "normal" with the Leader's uid; that slot gets its Special variant
+ * back. Only the Casual team and the Showcase use this (never the Ranked team).
+ */
+export function slotVariant(user, slot) {
+  const v = normV(slot?.variant);
+  const rec = typeof slot?.uid === "string" ? user?.box?.[slot.uid] : null;
+  return v === "normal" && rec && Number(rec.id) === Number(slot.id) && isSpecialVariant(variantOf(rec)) ? variantOf(rec) : v;
+}
 
 /** { exp, level } of one copy, or null. */
 export function copyTraining(user, uid) {
@@ -276,7 +298,7 @@ export function takeCopy(user, uid) {
  */
 export function adoptCopy(user, { rec, custom = null }) {
   // A Special variant is kept for good; gift.js never takes one (spareCopies), so this is a bug guard.
-  if (isSpecialVariant(rec?.variant)) throw new Error("adoptCopy: a Special variant can't be gifted");
+  if (isSpecialVariant(variantOf(rec))) throw new Error("adoptCopy: a Special variant can't be gifted");
   const variant = variantOf(rec);
   const made = addCopy(user, Number(rec.id), variant, { exp: rec.exp, at: rec.at ?? null });
   if (custom) {
@@ -369,6 +391,10 @@ export function normalizeBox(user, { rand = Math.random, now = Date.now() } = {}
     if (!COPY_UID_PATTERN.test(uid) || !rec || typeof rec !== "object" || !Number.isInteger(Number(rec.id)) || Number(rec.id) < 1) {
       delete user.box[uid];
       res.changed = true;
+    } else if ("variant" in rec && variantOf(rec) !== rec.variant) {
+      // A Special key on a copy the previous release made shiny or evolved: it's a plain copy now.
+      delete rec.variant;
+      res.changed = true;
     }
   }
 
@@ -442,7 +468,10 @@ export function normalizeBox(user, { rand = Math.random, now = Date.now() } = {}
       const [idS, v] = key.split(":"); // a count key: the plain normal or shiny line, never a Special copy
       const best = copiesOf(user, Number(idS), v)[0];
       const shared = clampExp(user.training?.[key]?.exp);
-      if (best && shared > best.exp) { user.box[best.uid].exp = shared; res.changed = true; }
+      // The previous release's record follows its best copy under the count
+      // key, which may be a Special one: only EXP above all of them is new.
+      const top = Math.max(0, ...Object.values(user.box).filter((r) => Number(r.id) === Number(idS) && countKey(variantOf(r)) === v).map((r) => clampExp(r.exp)));
+      if (best && shared > top) { user.box[best.uid].exp = shared; res.changed = true; }
     }
   }
 
@@ -453,7 +482,9 @@ export function normalizeBox(user, { rand = Math.random, now = Date.now() } = {}
     const used = new Set();
     for (const s of team) {
       if (!s || typeof s !== "object") continue;
-      const v = normV(s.variant);
+      // Casual and Showcase: the Leader's slot as the previous release saved it ("normal") gets its Variant back.
+      const v = field === "battleTeam" ? normV(s.variant) : slotVariant(user, s);
+      if (isSpecialVariant(v) && s.variant !== v) { s.variant = v; res.changed = true; }
       const rec = s.uid ? user.box[s.uid] : null;
       if (rec && Number(rec.id) === Number(s.id) && variantOf(rec) === v && !used.has(s.uid)) { used.add(s.uid); continue; }
       const free = copiesOf(user, s.id, v).filter((c) => !used.has(c.uid));
