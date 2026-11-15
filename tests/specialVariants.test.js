@@ -10,8 +10,13 @@ import {
   specialBattleProfile, specialExtraMoves, specialSpriteFile, VARIANT_KEYS,
 } from "../utils/specialVariants.js";
 import { getSpecies, getMove } from "../utils/battle/data.js";
+import {
+  grantSpecial, ownedCount, isSpecialCopy, variantOf, copiesOf, spareCopies, canFeed, adoptCopy, normalizeBox, addCopy, DEX_NORMAL,
+} from "../services/box.js";
+import { expForLevel, levelForExp } from "../utils/training.js";
 
 const LEADER_STATS = { hp: 66, atk: 72, def: 97, spa: 75, spd: 96, spe: 64 };
+const plain = (u, level) => addCopy(u, 7, "normal", { exp: expForLevel(level) }).uid;
 
 section("catalog");
 {
@@ -52,6 +57,69 @@ section("catalog");
   assertEqual(specialVariant("squad-leader").startLevel, 25, "the Leader starts at Lv 25");
   assertEqual(specialVariant("nope"), null, "unknown key → null");
   assertTrue(Object.isFrozen(SPECIAL_VARIANTS), "catalog is frozen");
+}
+
+section("box");
+{
+  const u = {};
+  const g = grantSpecial(u, "squad-leader", { at: 1 });
+  assertEqual(g.granted, true, "first grant adds the Leader");
+  const rec = u.box[g.uid];
+  assertEqual({ id: rec.id, variant: rec.variant, shiny: rec.shiny }, { id: 7, variant: "squad-leader", shiny: undefined }, "box record is a Squirtle with the Special variant");
+  assertEqual(levelForExp(rec.exp), 25, "the Leader starts at Lv 25");
+  assertEqual(variantOf(rec), "squad-leader", "variantOf reads the Special variant");
+  assertEqual(u.pokemon[7].normal, 1, "derived count: the Leader counts under normal");
+  assertTrue((u.pokedex[7] & DEX_NORMAL) !== 0, "registers Squirtle like a normal copy");
+  assertEqual(ownedCount(u, 7, "squad-leader"), 1, "owns one Leader");
+  assertEqual(ownedCount(u, 7, "normal"), 0, "owns no plain Squirtle");
+  assertEqual(isSpecialCopy(u, g.uid), true, "isSpecialCopy");
+  const again = grantSpecial(u, "squad-leader", { at: 2 });
+  assertEqual(again, { granted: false, uid: g.uid }, "a second grant gives nothing and names the existing copy");
+  assertEqual(Object.keys(u.box).length, 1, "still one copy");
+}
+{
+  // only-squirtle-is-leader survives two normalizes
+  const u = {};
+  const { uid } = grantSpecial(u, "squad-leader");
+  u.displayedPokemon = [{ id: 7, variant: "squad-leader", uid }];
+  normalizeBox(u);
+  normalizeBox(u);
+  assertEqual(u.box[uid]?.variant, "squad-leader", "only-squirtle-is-leader survives two normalizes: record kept");
+  assertEqual(u.displayedPokemon[0].uid, uid, "only-squirtle-is-leader survives two normalizes: slot keeps its uid");
+  assertEqual(u.pokemon[7].normal, 1, "only-squirtle-is-leader survives two normalizes: count kept");
+}
+{
+  // The previous release reads a record without `shiny` as normal: counts must match that.
+  const u = {};
+  plain(u, 5);
+  plain(u, 30);
+  grantSpecial(u, "squad-leader");
+  assertEqual(u.pokemon[7].normal, Object.values(u.box).filter((r) => !r.shiny).length, "rollback counts: normal counts every non-shiny record");
+  const res = normalizeBox(u);
+  assertEqual([res.added, res.removed], [0, 0], "rollback counts: a normalize adds and removes nothing");
+}
+{
+  // A plain Squirtle slot never gets the Leader as a stand-in.
+  const u = {};
+  grantSpecial(u, "squad-leader");
+  u.displayedPokemon = [{ id: 7, variant: "normal" }];
+  u.battleTeam = [{ id: 7, variant: "normal" }];
+  normalizeBox(u);
+  assertEqual("uid" in u.displayedPokemon[0], false, "a normal Squirtle slot with only the Leader owned gets no uid");
+  assertEqual("uid" in u.battleTeam[0], false, "nor does a Ranked one");
+}
+{
+  const u = {};
+  const p30 = plain(u, 30);
+  const { uid: leader } = grantSpecial(u, "squad-leader");
+  assertEqual(copiesOf(u, 7, "normal").map((c) => c.uid), [p30], "copiesOf normal excludes the Leader");
+  assertEqual(copiesOf(u, 7, "squad-leader").map((c) => c.uid), [leader], "copiesOf squad-leader is only the Leader");
+  assertEqual(spareCopies(u, 7, "normal").map((c) => c.uid), [p30], "spareCopies never offers the Leader, even with the lowest EXP");
+  assertEqual(canFeed(u, { from: leader, to: p30 }).code, "special", "the Leader can't be fed");
+  assertEqual(canFeed(u, { from: p30, to: leader }).code, "special", "nothing can be fed to the Leader");
+  let threw = false;
+  try { adoptCopy(u, { rec: u.box[leader] }); } catch { threw = true; }
+  assertTrue(threw, "adoptCopy refuses a Special record (a Gift never carries one)");
 }
 
 finish();

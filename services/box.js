@@ -3,13 +3,15 @@
 // docs/adr/0001-individual-copies-and-permanent-pokedex.md
 //
 // Source of truth:
-//   user.box[uid] = { id, shiny?: true, exp, at? }   one record per Copy
+//   user.box[uid] = { id, shiny?: true, variant?: "<Special variant>", exp, at? }   one record per Copy
 //   user.pokedex[id] = 1 | 2 | 3                      bit 1 normal, bit 2 shiny
 //
 // Derived (rewritten by syncLine after every change, read by older code and
 // by the previous release during the rollback window):
-//   user.pokemon[id] = { normal, shiny }   copies per line
-//   user.training["id:variant"] = { exp }  the line's best copy
+//   user.pokemon[id] = { normal, shiny }   copies per line; a Special variant
+//                                          copy (the Squirtle Squad Leader) counts
+//                                          as normal (docs/adr/0002-special-variants.md)
+//   user.training["id:variant"] = { exp }  the line's best copy, per exact variant
 //
 // Trained copies keep their user.customPokemon[uid] record (TM moves); the
 // box record of a trained copy uses the same uid.
@@ -22,6 +24,7 @@ import {
   expForLevel, levelForExp, floorLevel, rollCatchLevel, trainingKey,
 } from "../utils/training.js";
 import { LEVEL_CAP, DUPLICATE_LEVEL_SHARE } from "../utils/battle/tuning.js";
+import { normalizeVariant, countKey, isSpecialVariant, specialVariant } from "../utils/specialVariants.js";
 
 export const COPY_UID_PATTERN = /^c_[A-Za-z0-9]{10}$/;
 /** Team fields whose slots each name one copy. showcaseTeam arrives with the three-teams split. */
@@ -29,11 +32,23 @@ export const TEAM_FIELDS = ["displayedPokemon", "battleTeam", "showcaseTeam"];
 export const DEX_NORMAL = 1;
 export const DEX_SHINY = 2;
 
-const VARIANTS = ["normal", "shiny"];
+const VARIANTS = ["normal", "shiny"]; // derived-count keys
 const maxExp = () => expForLevel(LEVEL_CAP);
-const variantOf = (rec) => (rec?.shiny ? "shiny" : "normal");
-const normV = (v) => (v === "shiny" ? "shiny" : "normal");
-const bitOf = (variant) => (normV(variant) === "shiny" ? DEX_SHINY : DEX_NORMAL);
+/** A copy's Variant: its Special variant, else shiny or normal. */
+export const variantOf = (rec) => (isSpecialVariant(rec?.variant) ? rec.variant : rec?.shiny ? "shiny" : "normal");
+const normV = normalizeVariant;
+const bitOf = (variant) => (variant === "shiny" ? DEX_SHINY : DEX_NORMAL);
+/** Copies of a species counted under one derived-count key (normal counts Special copies too). */
+const countedCopies = (user, id, key) =>
+  Object.values(user?.box ?? {}).filter((rec) => Number(rec?.id) === Number(id) && countKey(variantOf(rec)) === key).length;
+/** Rewrites a record's Variant fields. */
+function setVariant(rec, v) {
+  delete rec.shiny;
+  delete rec.variant;
+  if (v === "shiny") rec.shiny = true;
+  else if (isSpecialVariant(v)) rec.variant = v;
+}
+const variantFields = (v) => (v === "shiny" ? { shiny: true } : isSpecialVariant(v) ? { variant: v } : {});
 const clampExp = (exp) => Math.max(0, Math.min(maxExp(), Math.floor(Number(exp) || 0)));
 
 // ---------------------------------------------------------- Pokédex
@@ -139,6 +154,12 @@ function describe(user, uid, rec) {
 
 export const isTrained = (user, uid) => !!user?.customPokemon?.[uid] && !user.customPokemon[uid].suspended;
 
+/** True when this copy is a Special variant (kept for good: never auto-picked, donated, fed, gifted or transformed). */
+export const isSpecialCopy = (user, uid) => isSpecialVariant(copyOf(user, uid)?.variant);
+
+/** How many copies of exactly this species + Variant the player owns (read from the box). */
+export const ownedCount = (user, id, variant) => copiesOf(user, id, variant).length;
+
 /** { exp, level } of one copy, or null. */
 export function copyTraining(user, uid) {
   const rec = copyOf(user, uid);
@@ -160,26 +181,34 @@ export function slotsHolding(user, uid) {
 
 export const isOnTeam = (user, uid) => slotsHolding(user, uid).length > 0;
 
-/** Lowest-Level copies of the line that are on no Team and untrained (auto-pick order). */
+/** Lowest-Level copies of the line that are on no Team, untrained and not Special (auto-pick order). */
 export function spareCopies(user, id, variant) {
   return copiesOf(user, id, variant)
-    .filter((c) => !c.trained && !isOnTeam(user, c.uid))
+    .filter((c) => !c.trained && !isSpecialVariant(c.variant) && !isOnTeam(user, c.uid))
     .sort((a, b) => a.exp - b.exp || a.uid.localeCompare(b.uid));
 }
 
 /** Rewrite the derived count + training record of one line from the box. */
+// Counts go by derived-count key (a Special copy counts as normal, as the
+// previous release reads it); the training record is per exact Variant, so a
+// plain line's best copy is never the Special one.
 export function syncLine(user, id, variant) {
   const v = normV(variant);
+  const key = countKey(v);
   const copies = copiesOf(user, id, v);
+  const counted = countedCopies(user, id, key);
   user.pokemon ??= {};
-  if (copies.length) {
+  if (counted) {
     user.pokemon[id] ??= { normal: 0, shiny: 0 };
-    user.pokemon[id][v] = copies.length;
+    user.pokemon[id][key] = counted;
+  } else if (user.pokemon[id]) {
+    user.pokemon[id][key] = 0;
+  }
+  if (copies.length) {
     user.training ??= {};
     user.training[trainingKey(id, v)] = { exp: copies[0].exp };
-  } else {
-    if (user.pokemon[id]) user.pokemon[id][v] = 0;
-    if (user.training) delete user.training[trainingKey(id, v)];
+  } else if (user.training) {
+    delete user.training[trainingKey(id, v)];
   }
   const e = user.pokemon[id];
   if (e && (e.normal ?? 0) <= 0 && (e.shiny ?? 0) <= 0) delete user.pokemon[id];
@@ -195,9 +224,23 @@ export function addCopy(user, id, variant, { exp = null, at = Date.now(), uid = 
   const useUid = uid && COPY_UID_PATTERN.test(uid) && !user?.box?.[uid] ? uid : newCopyUid(user);
   const e = clampExp(exp ?? expForLevel(rollCatchLevel(Number(id), rand)));
   user.box ??= {};
-  user.box[useUid] = { id: Number(id), ...(v === "shiny" ? { shiny: true } : {}), exp: e, ...(at ? { at } : {}) };
+  user.box[useUid] = { id: Number(id), ...variantFields(v), exp: e, ...(at ? { at } : {}) };
   syncLine(user, id, v);
   return { uid: useUid, exp: e, level: levelForExp(e), ...registerDex(user, id, v) };
+}
+
+/**
+ * Gives the player a Special variant (the Squirtle Squad Leader for beating
+ * the Squad) at its catalog start Level, unless they already have one: a
+ * player holds at most one of each.
+ * @returns {{ granted: boolean, uid: string|null }}
+ */
+export function grantSpecial(user, key, { at = Date.now() } = {}) {
+  if (!isSpecialVariant(key)) throw new Error(`grantSpecial: unknown Special variant ${key}`);
+  const { species, startLevel } = specialVariant(key);
+  const have = copiesOf(user, species, key)[0];
+  if (have) return { granted: false, uid: have.uid };
+  return { granted: true, uid: addCopy(user, species, key, { exp: expForLevel(startLevel), at }).uid };
 }
 
 /**
@@ -228,6 +271,8 @@ export function takeCopy(user, uid) {
  * @returns {{ uid, level, newSpecies, newShiny }}
  */
 export function adoptCopy(user, { rec, custom = null }) {
+  // A Special variant is kept for good; gift.js never takes one (spareCopies), so this is a bug guard.
+  if (isSpecialVariant(rec?.variant)) throw new Error("adoptCopy: a Special variant can't be gifted");
   const variant = variantOf(rec);
   const made = addCopy(user, Number(rec.id), variant, { exp: rec.exp, at: rec.at ?? null });
   if (custom) {
@@ -264,6 +309,8 @@ export function canFeed(user, { from, to, confirmRev = undefined }) {
   const b = copyOf(user, to);
   if (!a || !b) return fail("unknown_copy", "That Pokémon copy no longer exists.");
   if (from === to) return fail("bad_request", "A Pokémon can't be fed to itself.");
+  const special = [a, b].map(variantOf).find(isSpecialVariant);
+  if (special) return fail("special", `The ${specialVariant(special).name} can't be fed or fed to.`);
   if (Number(a.id) !== Number(b.id) || variantOf(a) !== variantOf(b)) return fail("bad_request", "Only a copy of the same Pokémon and variant can be fed.");
   if (isOnTeam(user, from)) return fail("on_team", "That Pokémon is on a team. Take it off the team first.");
   const custom = user.customPokemon?.[from];
@@ -321,10 +368,12 @@ export function normalizeBox(user, { rand = Math.random, now = Date.now() } = {}
     }
   }
 
-  // Lines to look at: counted lines + box lines.
+  // Lines to look at, by derived-count key (a Special copy counts as normal):
+  // counted lines + box lines. Reconciling never adds or removes a Special
+  // copy: the previous release never made one, and counts it as normal.
   const lines = new Set();
   for (const [id, e] of Object.entries(pokemon)) for (const v of VARIANTS) if ((Number(e?.[v]) || 0) > 0) lines.add(`${Number(id)}:${v}`);
-  for (const rec of Object.values(user.box)) lines.add(`${Number(rec.id)}:${variantOf(rec)}`);
+  for (const rec of Object.values(user.box)) lines.add(`${Number(rec.id)}:${countKey(variantOf(rec))}`);
 
   for (const key of lines) {
     const [idS, v] = key.split(":");
@@ -332,24 +381,25 @@ export function normalizeBox(user, { rand = Math.random, now = Date.now() } = {}
     const want = Math.max(0, Math.floor(Number(pokemon[id]?.[v]) || 0));
     const sharedExp = clampExp(user.training?.[trainingKey(id, v)]?.exp ?? expForLevel(floorLevel(id)));
     const sharedLevel = levelForExp(sharedExp);
-    const trainedUids = Object.values(user.customPokemon ?? {})
-      .filter((c) => c && !c.suspended && Number(c.speciesId) === id && c.variant === v)
-      .map((c) => c.uid);
+    const trained = Object.values(user.customPokemon ?? {})
+      .filter((c) => c && !c.suspended && Number(c.speciesId) === id && countKey(normV(c.variant)) === v);
 
-    // 3. trained records always have a box record
-    for (const uid of trainedUids) {
+    // 3. trained records always have a box record (of the trained record's exact Variant)
+    for (const { uid, variant } of trained) {
+      const tv = normV(variant);
       if (!user.box[uid]) {
-        user.box[uid] = { id, ...(v === "shiny" ? { shiny: true } : {}), exp: sharedExp };
+        user.box[uid] = { id, ...variantFields(tv), exp: sharedExp };
         res.changed = true;
         res.added++;
-      } else if (Number(user.box[uid].id) !== id || variantOf(user.box[uid]) !== v) {
+      } else if (Number(user.box[uid].id) !== id || variantOf(user.box[uid]) !== tv) {
         user.box[uid].id = id;
-        if (v === "shiny") user.box[uid].shiny = true; else delete user.box[uid].shiny;
+        setVariant(user.box[uid], tv);
         res.changed = true;
       }
     }
+    const trainedUids = trained.map((c) => c.uid);
 
-    let have = copiesOf(user, id, v).length;
+    let have = countedCopies(user, id, v);
     if (have < want) {
       // 1 (migration) or 2 (counts grew under an older release)
       const plainSlotUsed = TEAM_FIELDS.some((f) => Array.isArray(user[f]) && user[f].some((s) => s && Number(s.id) === id && normV(s.variant) === v && !(s.uid && user.box[s.uid])));
@@ -385,7 +435,7 @@ export function normalizeBox(user, { rand = Math.random, now = Date.now() } = {}
   // catches) during the rollback window lands on the line's best copy.
   if (!migrating) {
     for (const key of lines) {
-      const [idS, v] = key.split(":");
+      const [idS, v] = key.split(":"); // a count key: the plain normal or shiny line, never a Special copy
       const best = copiesOf(user, Number(idS), v)[0];
       const shared = clampExp(user.training?.[key]?.exp);
       if (best && shared > best.exp) { user.box[best.uid].exp = shared; res.changed = true; }
