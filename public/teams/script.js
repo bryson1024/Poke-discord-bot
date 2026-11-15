@@ -30,6 +30,7 @@ import { openMovesEditor } from "/public/teams/moves.js";
 import { chooseCopy } from "/public/teams/copyPicker.js";
 import { openItemPicker, itemIcon, claimStarter } from "/public/teams/items.js";
 import { openDetail } from "/public/picker-pokemon/detail.js";
+import { SPECIAL_NAMES, isSpecial, variantKey, specialSprite, rowVariant } from "/public/spriteconfig.js";
 
 const TEAMS = ["showcase", "display", "battle"];
 const LABEL = { showcase: "Showcase team", display: "Casual team", battle: "Ranked team" };
@@ -45,7 +46,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const keyOf = (s) => `${s.id}:${s.variant}`;
 // A stored slot as the page keeps it. `uid` names a trained copy (TM system);
 // it must survive every edit, or saving would drop the copy from its slot.
-const slotFromServer = (s) => ({ id: Number(s.id), variant: s.variant === "shiny" ? "shiny" : "normal", ...(s.mega ? { mega: s.mega } : {}), ...(s.uid ? { uid: s.uid } : {}) });
+const slotFromServer = (s) => ({ id: Number(s.id), variant: variantKey(s.variant), ...(s.mega ? { mega: s.mega } : {}), ...(s.uid ? { uid: s.uid } : {}) });
 const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
@@ -84,7 +85,7 @@ const isMythic = (id) => String(species(id).tier).toLowerCase() === "mythic";
 const typeChips = (id) => `<span class="tm-types">${(species(id).types ?? []).map((t) => TYPE_NAMES[t]).filter(Boolean).map((t) => `<span class="cc-type" data-type="${t}">${t}</span>`).join("")}</span>`;
 /** The copies of one Pokémon + Variant, best Level first: [{ uid, level, trained }]. */
 const copiesOfLine = (id, variant) => state.copies
-  .filter((r) => r[1] === Number(id) && r[2] === (variant === "shiny" ? 1 : 0))
+  .filter((r) => r[1] === Number(id) && rowVariant(r) === variantKey(variant))
   .map(([uid, , , level, , trained]) => ({ uid, level, trained: !!trained }))
   .sort((a, b) => b.level - a.level || a.uid.localeCompare(b.uid));
 /** A copy of the line not used on team t (except at slot `except`), or null. */
@@ -98,11 +99,14 @@ const isTrainedCopy = (s) => !!(s.uid && state.copies.find((r) => r[0] === s.uid
 const levelOf = (s) => (s.uid && state.copies.find((r) => r[0] === s.uid)?.[3]) ?? state.levels[keyOf(s)] ?? "?";
 const powerOf = (s) => state.powers[keyOf(s)] ?? 0;
 const megaCard = (formId) => state.megaCards.find((c) => c.formId === formId);
-const slotName = (s) => (s.mega && state.megaOn ? megaCard(s.mega)?.name ?? megaName(s) : species(s.id).name);
+/** The Pokémon's name, or a Special variant's own (the Squirtle Squad Leader). */
+const nameOf = (s) => (isSpecial(s.variant) ? SPECIAL_NAMES[s.variant] : species(s.id).name);
+const slotName = (s) => (s.mega && state.megaOn ? megaCard(s.mega)?.name ?? megaName(s) : nameOf(s));
 /** Mega forms this exact copy can use on a team (unlocked on its line, allowed for teams). */
 const megaFormsFor = (s) => state.megaCards.filter((c) => c.line === `${s.id}:${s.variant}` && c.teamSelectable);
 const megaName = (s) => `Mega ${species(s.id).name}${/-([xy])$/.test(s.mega) ? ` ${s.mega.slice(-1).toUpperCase()}` : ""}`;
 function spriteOf(s) {
+  if (isSpecial(s.variant)) return specialSprite(s.variant);
   if (s.mega && state.megaOn) return `/public/sprites/pokemon/mega/${s.variant}/${s.mega}.gif`;
   return `/public/sprites/pokemon/${s.variant === "shiny" ? "shiny" : "normal"}/${s.id}.gif`;
 }
@@ -181,11 +185,13 @@ function blockReason(t, s, { replaceAt = -1 } = {}) {
   // The Showcase takes repeats, one copy per slot (two Caterpie need two Caterpie).
   if (isShowcase(t)) {
     if (list.length >= MAX) return { code: "full", short: "Team full", text: `Your ${LABEL[t]} is full (6/6). Remove a Pokémon first.` };
-    if (!freeCopy(t, s.id, s.variant, replaceAt)) return { code: "nocopy", short: "No copy left", text: `Every ${species(s.id).name} you own is already in your Showcase.` };
+    if (!freeCopy(t, s.id, s.variant, replaceAt)) return { code: "nocopy", short: "No copy left", text: `Every ${nameOf(s)} you own is already in your Showcase.` };
     return null;
   }
+  // A Special variant (the Squirtle Squad Leader) never joins the Ranked team (the server's message).
+  if (t === "battle" && isSpecial(s.variant)) return { code: "special", short: "Not for Ranked", text: `The ${nameOf(s)} can't join the Ranked team.` };
   // Casual and Ranked hold each Pokémon once (only the Showcase takes repeats).
-  if (list.some((m) => m.id === s.id && m.variant === s.variant)) return { code: "on", short: "On this team", text: `${species(s.id).name} is already on your ${LABEL[t]}.` };
+  if (list.some((m) => m.id === s.id && m.variant === s.variant)) return { code: "on", short: "On this team", text: `${nameOf(s)} is already on your ${LABEL[t]}.` };
   if (list.length >= MAX) return { code: "full", short: "Team full", text: `Your ${LABEL[t]} is full (6/6). Remove a Pokémon first.` };
   if (t === "battle" && isMythic(s.id)) {
     const other = list.find((m) => isMythic(m.id));
@@ -572,49 +578,52 @@ function switcher() {
 
 function boxItems() {
   const out = [];
+  // A Special copy (the Squirtle Squad Leader) gets its own tile; its count sits under normal.
+  const specials = state.copies.filter((r) => r[8] && state.data[r[1]]);
   for (const [k, v] of Object.entries(state.pokemon)) {
     const id = Number(k);
     if (!Number.isInteger(id) || !state.data[id]) continue;
-    if ((v?.normal ?? 0) > 0) out.push({ id, variant: "normal", count: v.normal });
+    const normal = (v?.normal ?? 0) - specials.filter((r) => r[1] === id).length;
+    if (normal > 0) out.push({ id, variant: "normal", count: normal });
     if ((v?.shiny ?? 0) > 0) out.push({ id, variant: "shiny", count: v.shiny });
   }
+  for (const r of specials) out.push({ id: r[1], variant: r[8], count: 1 });
   const { q, show, sort } = state.filter;
   const qq = q.trim().toLowerCase();
   const list = out.filter((s) => {
     if (show === "shiny" && s.variant !== "shiny") return false;
     if (show === "free" && membership(s).length) return false;
-    if (qq && !species(s.id).name.toLowerCase().includes(qq) && !(species(s.id).storedName ?? "").toLowerCase().includes(qq) && String(s.id) !== qq) return false;
+    if (qq && !nameOf(s).toLowerCase().includes(qq) && !(species(s.id).storedName ?? "").toLowerCase().includes(qq) && String(s.id) !== qq) return false;
     return true;
   });
   const by = {
     power: (a, b) => powerOf(b) - powerOf(a) || a.id - b.id,
     level: (a, b) => (Number(levelOf(b)) || 0) - (Number(levelOf(a)) || 0) || a.id - b.id,
     dex: (a, b) => a.id - b.id || (a.variant === "shiny") - (b.variant === "shiny"),
-    name: (a, b) => species(a.id).name.localeCompare(species(b.id).name),
+    name: (a, b) => nameOf(a).localeCompare(nameOf(b)),
   }[sort];
   return list.sort(by);
 }
 
 function boxTile(s) {
   const t = state.active;
-  const sp = species(s.id);
   const why = state.draft[t] == null && t === "battle" ? null : blockReason(t, s);
   const badges = membership(s).map((m) => `<span class="tm-mem tm-mem--${m.t}" title="${LABEL[m.t]}, slot ${m.slot}">${SHORT[m.t]}${m.slot}</span>`).join("");
   const shiny = s.variant === "shiny";
-  const blocked = why && why.code === "mythic";
+  const blocked = why && (why.code === "mythic" || why.code === "special");
   const n = copiesOfLine(s.id, s.variant).length;
-  const label = `${sp.name}${shiny ? " (shiny)" : ""}, Lv ${levelOf(s)}${n > 1 ? `, you have ${n}` : ""}${why ? `. ${why.short}` : `. Add to your ${LABEL[t]}`}`;
+  const label = `${nameOf(s)}${shiny ? " (shiny)" : ""}, Lv ${levelOf(s)}${n > 1 ? `, you have ${n}` : ""}${why ? `. ${why.short}` : `. Add to your ${LABEL[t]}`}`;
   return `<li class="tm-tile${shiny ? " is-shiny" : ""}${blocked ? " is-blocked" : ""}${why?.code === "on" ? " is-on" : ""}">
     <button type="button" class="tm-tile-btn" data-act="add" data-id="${s.id}" data-variant="${s.variant}" aria-label="${esc(label)}" draggable="true">
       <span class="tm-tile-badges">${badges}</span>
-      ${blocked ? `<span class="tm-tile-block" title="${esc(why.text)}"><svg class="tm-ic" aria-hidden="true"><use href="#tm-lock"/></svg>Mythic</span>` : ""}
+      ${blocked ? `<span class="tm-tile-block" title="${esc(why.text)}"><svg class="tm-ic" aria-hidden="true"><use href="#tm-lock"/></svg>${why.code === "special" ? "Not for Ranked" : "Mythic"}</span>` : ""}
       ${shiny ? `<span class="tm-shiny tm-shiny--sm"><svg class="tm-ic" aria-hidden="true"><use href="#tm-sparkle"/></svg></span>` : ""}
-      <span class="tm-tile-art"${shiny ? ` data-fx="shiny" data-fx-seed="${s.id}"` : ""}><img class="cc-sprite" src="/public/sprites/pokemon/${shiny ? "shiny" : "normal"}/${s.id}.gif" alt="" loading="lazy" onerror="this.onerror=null;this.src='/public/sprites/items/pokeball.png'"></span>
-      <span class="tm-tile-name">${esc(sp.name)}</span>
+      <span class="tm-tile-art"${shiny ? ` data-fx="shiny" data-fx-seed="${s.id}"` : ""}><img class="cc-sprite" src="${spriteOf(s)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/public/sprites/items/pokeball.png'"></span>
+      <span class="tm-tile-name">${esc(nameOf(s))}</span>
       ${typeChips(s.id)}
       <span class="tm-tile-lv">Lv ${levelOf(s)}${n > 1 ? ` · ×${n}` : ""}${isMythic(s.id) && !blocked ? ` · <b class="tier-text mythic">Mythic</b>` : ""}</span>
     </button>
-    <button type="button" class="tm-tile-info" data-act="details-box" data-id="${s.id}" data-variant="${s.variant}" aria-label="${esc(sp.name)}${shiny ? " (shiny)" : ""}: details">i</button></li>`;
+    <button type="button" class="tm-tile-info" data-act="details-box" data-id="${s.id}" data-variant="${s.variant}" aria-label="${esc(nameOf(s))}${shiny ? " (shiny)" : ""}: details">i</button></li>`;
 }
 
 function boxPanel(where) {

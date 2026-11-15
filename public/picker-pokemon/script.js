@@ -37,7 +37,7 @@ const multiSelected = new Set(); // Pokémon IDs
 // The box tile the player tapped (docs/adr/0001): preselected in "Which one?".
 let pendingCopyUid = null;
 
-import { rarityEmojis } from "/public/spriteconfig.js";
+import { rarityEmojis, SPECIAL_NAMES, specialSprite, rowVariant } from "/public/spriteconfig.js";
 import { getNextMondayUTC, formatCountdown } from "/public/weeklyReset.js";
 import { getRegions, countOwned, countRegistered } from "/public/picker-pokemon/regions.js";
 import * as bulkRules from "/public/picker-pokemon/bulkRules.js";
@@ -749,6 +749,8 @@ function renderPokemonGrid() {
 const boxRows = () => (Array.isArray(userData.copies) ? userData.copies : []);
 
 function boxTileLocked(c, tier) {
+  // A Special copy (the Squirtle Squad Leader) is kept for good: no donating, feeding, evolving or shiny craft.
+  if (c.special && currentMode !== "browse") return true;
   if (currentMode === "evolve") return !isEvolutionEligibleAnyVariant(c.id);
   if (currentMode === "donate") return c.teams > 0;
   if (currentMode === "convert") {
@@ -756,7 +758,7 @@ function boxTileLocked(c, tier) {
     // Converting needs Dust, a normal copy, and no shiny of it owned yet (same rule as before).
     return c.shiny || cost <= 0 || (userData.items?.shiny_dust ?? 0) < cost || ownedCounts(c.id).shiny > 0;
   }
-  if (currentMode === "feed") return boxRows().filter((r) => r[1] === c.id && r[2] === (c.shiny ? 1 : 0)).length < 2;
+  if (currentMode === "feed") return boxRows().filter((r) => r[1] === c.id && rowVariant(r) === (c.shiny ? "shiny" : "normal")).length < 2;
   return false;
 }
 
@@ -767,7 +769,7 @@ function renderBoxTiles(container) {
   const sortOrder = document.getElementById("sortOrder")?.value || "dex";
 
   const tiles = [];
-  for (const [uid, id, shiny, level, at, trained, teams] of boxRows()) {
+  for (const [uid, id, shiny, level, at, trained, teams, , special] of boxRows()) {
     const p = pokemonData[id];
     if (!p) continue;
     const tier = tierOf(p);
@@ -776,7 +778,7 @@ function renderBoxTiles(container) {
     if (typeFilter && !(p.types ?? []).map((t) => TYPE_MAP[t]).includes(typeFilter)) continue;
     if (regionFilter && p.region !== regionFilter) continue;
     if (shinyOnly && !shiny) continue;
-    tiles.push({ uid, id, shiny: !!shiny, level, at, trained: !!trained, teams, p, tier });
+    tiles.push({ uid, id, shiny: !!shiny, level, at, trained: !!trained, teams, p, tier, special: special ?? null });
   }
 
   const byDex = (a, b) => a.id - b.id || b.level - a.level || a.uid.localeCompare(b.uid);
@@ -792,7 +794,7 @@ function renderBoxTiles(container) {
 
   const tile = (c) => {
     const locked = boxTileLocked(c, c.tier);
-    const name = c.p.name || `#${c.id}`;
+    const name = c.special ? SPECIAL_NAMES[c.special] ?? c.p.name : c.p.name || `#${c.id}`;
     const onTeams = teamNames(c.teams);
     const el = document.createElement("div");
     el.className = `pokemon-card owned box-tile${c.shiny ? " shiny-view" : ""}${locked ? " locked" : ""}`;
@@ -808,7 +810,7 @@ function renderBoxTiles(container) {
       : "";
     el.innerHTML = `
       <div class="sprite-wrapper"${c.shiny ? ` data-fx="shiny" data-fx-seed="${c.id}"` : ""}>
-        <img src="${spriteFor(c.id, c.shiny ? "shiny" : "normal")}" class="poke-sprite" alt="" loading="lazy">
+        <img src="${c.special ? specialSprite(c.special) : spriteFor(c.id, c.shiny ? "shiny" : "normal")}" class="poke-sprite" alt="" loading="lazy">
         ${teamBadge}
         ${c.trained ? `<div class="count-label bottom-left" title="Has TM-trained moves">★ TM</div>` : ""}
         ${locked ? `<div class="lock-overlay">${LOCK_ICON}</div>` : ""}
@@ -860,6 +862,10 @@ function onBoxTileClick(c, locked) {
   pendingCopyUid = c.uid;
   viewVariant.set(c.id, c.shiny ? "shiny" : "normal");
   if (locked) {
+    if (c.special) {
+      const name = SPECIAL_NAMES[c.special] ?? c.p.name;
+      return showMessage({ title: "Kept for good", message: `The ${name} is kept for good: it can't be donated, fed, evolved or made shiny.` });
+    }
     if (currentMode === "donate" || currentMode === "feed") {
       const msg = currentMode === "feed" && !c.teams
         ? `You need another ${c.shiny ? "shiny " : ""}${c.p.name} to feed this one.`
@@ -868,7 +874,7 @@ function onBoxTileClick(c, locked) {
     }
     return showBlockedActionModal(c.id);
   }
-  if (currentMode === "browse") return openDetail(c.id, detailContext());
+  if (currentMode === "browse") return openDetail(c.id, detailContext(), c.special ? { variant: c.special } : {});
   if (currentMode === "evolve") return openEvolutionModal(c.id);
   if (currentMode === "donate") return openDonationConfirmModal(c.id, c.shiny ? "shiny" : "normal");
   if (currentMode === "convert") return openConvertModal(c.id);
@@ -2319,7 +2325,7 @@ function multiSelectRows() {
 // Change Team edits, so it can't be used for these locks.
 function multiSelectBlock(pid) {
   const savedTeam = (userData.currentTeam || []).map(toTeamObj).filter(Boolean);
-  return bulkRules.multiSelectBlock(pid, { pokemon: userData.pokemon, pokemonData, savedTeam, trained: userData.trained });
+  return bulkRules.multiSelectBlock(pid, { pokemon: userData.pokemon, pokemonData, savedTeam, trained: userData.trained, copies: userData.copies });
 }
 
 function bulkTotals(rows) {

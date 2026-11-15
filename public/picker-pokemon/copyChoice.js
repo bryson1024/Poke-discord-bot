@@ -43,20 +43,22 @@ function ensureCss() {
   document.head.append(st);
 }
 
+import { variantKey, rowVariant } from "../spriteconfig.js";
+
 const TEAM_NAMES = [[1, "Casual"], [2, "Ranked"], [4, "Showcase"]];
 export const teamNames = (mask) => TEAM_NAMES.filter(([b]) => (mask & b) !== 0).map(([, n]) => n);
 
 /** Trained copies of one Pokémon + Variant (from /api/user-pokemon). */
 export function trainedCopies(userData, pokeId, variant) {
-  return userData?.trained?.[`${Number(pokeId)}:${variant === "shiny" ? "shiny" : "normal"}`] ?? [];
+  return userData?.trained?.[`${Number(pokeId)}:${variantKey(variant)}`] ?? [];
 }
 
 /** Every copy of one Pokémon + Variant, best Level first: [{ uid, level, at, trained, teams, rev, tmMoves }]. */
 export function copiesOf(userData, pokeId, variant) {
-  const shiny = variant === "shiny" ? 1 : 0;
+  const v = variantKey(variant);
   const trained = new Map(trainedCopies(userData, pokeId, variant).map((t) => [t.uid, t]));
   return (Array.isArray(userData?.copies) ? userData.copies : [])
-    .filter((r) => r[1] === Number(pokeId) && r[2] === shiny)
+    .filter((r) => r[1] === Number(pokeId) && rowVariant(r) === v)
     .map(([uid, , , level, at, isTrained, teams]) => ({
       uid, level, at, teams, trained: !!isTrained,
       rev: trained.get(uid)?.rev ?? null,

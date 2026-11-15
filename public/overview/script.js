@@ -17,6 +17,7 @@ import { displaySpeciesName } from "/public/shared/names.js";
 import { scanFx } from "/public/shared/spriteFx.js";
 import { getRegions, countRegistered } from "/public/picker-pokemon/regions.js";
 import { getNextMondayUTC, formatCountdown } from "/public/weeklyReset.js";
+import { SPECIAL_NAMES, isSpecial, specialSprite } from "/public/spriteconfig.js";
 
 const app = document.getElementById("ovApp");
 const id = playerId();
@@ -35,6 +36,8 @@ const SHOWCASE_SLOTS = 6;
 
 // One slot's sprite: the Mega form while Mega Evolution is on, else base.
 function spriteOf(s, megaOn) {
+  // A Special variant (the Squirtle Squad Leader) has its own sprite.
+  if (isSpecial(s.variant)) return { shiny: false, mega: false, src: specialSprite(s.variant) };
   const shiny = s.variant === "shiny";
   const mega = s.mega && megaOn;
   return { shiny, mega, src: mega ? `/public/sprites/pokemon/mega/${s.variant}/${s.mega}.gif` : `/public/sprites/pokemon/${shiny ? "shiny" : "normal"}/${s.id}.gif` };
@@ -54,7 +57,7 @@ function showcase(team, ctx) {
     const s = list[i];
     if (!s) return `<li class="ov-ped is-empty"><span class="ov-ped-stage" aria-hidden="true"></span><span class="ov-ped-name">Empty</span></li>`;
     const { shiny, mega, src } = spriteOf(s, ctx.megaOn);
-    const name = ctx.data[s.id]?.name ?? `#${s.id}`;
+    const name = SPECIAL_NAMES[s.variant] ?? ctx.data[s.id]?.name ?? `#${s.id}`;
     return `<li class="ov-ped${shiny ? " shiny" : ""}${mega ? " mega" : ""}" ${shiny ? `data-fx="shiny" data-fx-seed="${s.id}"` : ""}>
       ${mega ? `<span class="ov-mega">Mega</span>` : ""}
       <span class="ov-ped-stage"><img src="${src}" alt="${esc(name)}${shiny ? " (shiny)" : ""}" onerror="this.onerror=null;this.src='/public/sprites/items/pokeball.png'"></span>
@@ -75,7 +78,7 @@ function strip(team, { ranked, ...ctx }) {
   }
   return `<ul class="ov-strip">${team.map((s, i) => {
     const { shiny, mega, src } = spriteOf(s, ctx.megaOn);
-    const name = ctx.data[s.id]?.name ?? `#${s.id}`;
+    const name = SPECIAL_NAMES[s.variant] ?? ctx.data[s.id]?.name ?? `#${s.id}`;
     return `<li class="${i === 0 ? "lead" : ""}${shiny ? " shiny" : ""}" ${shiny ? `data-fx="shiny" data-fx-seed="${s.id}"` : ""}>
       ${mega ? `<span class="ov-mega">Mega</span>` : ""}
       <img src="${src}" alt="${esc(name)}${shiny ? " (shiny)" : ""}" onerror="this.onerror=null;this.src='/public/sprites/items/pokeball.png'">

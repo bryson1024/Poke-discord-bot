@@ -3,6 +3,7 @@ import { computeStats } from "./stats.js";
 import { SURGE, CUTE } from "./tuning.js";
 import { createRng } from "./rng.js";
 import { cuteFactor } from "./cuteness.js";
+import { specialBattleProfile } from "../specialVariants.js";
 
 // Power rating: the sum of every Team member's stats at its Level.
 export function teamPower(members) {
@@ -27,7 +28,11 @@ export function pokemonPower(speciesId, level) {
 export function powersFromLevels(levels) {
   const out = {};
   for (const [key, level] of Object.entries(levels ?? {})) {
-    const p = pokemonPower(String(key).split(":")[0], level);
+    const [id, variant] = String(key).split(":");
+    // A Special variant (the Squirtle Squad Leader) has its own base stats.
+    const profile = specialBattleProfile(variant);
+    const s = profile && Number.isFinite(Number(level)) ? computeStats(profile.baseStats, Number(level)) : null;
+    const p = s ? s.hp + s.atk + s.def + s.spa + s.spd + s.spe : pokemonPower(id, level);
     if (p != null) out[key] = p;
   }
   return out;

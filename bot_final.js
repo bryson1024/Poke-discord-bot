@@ -39,18 +39,10 @@ import { fileURLToPath } from "url";
 import { getPokemonCached } from "./utils/pokemonCache.js";
 import { bulkDonate, donateOne } from "./utils/bulkDonate.js";
 import { pruneEmptyLine, normalizeCustomPokemon, carryCopyUids, trainedSummary } from "./services/ownership.js";
-import { normalizeBox, allCopies, slotsHolding, mergeDex } from "./services/box.js";
+import { normalizeBox, mergeDex } from "./services/box.js";
+import { copyRows } from "./services/copyRows.js";
 import { normalizeShowcase, prepareShowcaseSelection } from "./services/showcaseTeam.js";
 
-// Compact per-copy rows for the dashboard (see the /api/user payload).
-const TEAM_BIT = { displayedPokemon: 1, battleTeam: 2, showcaseTeam: 4 };
-function copyRows(u) {
-  return allCopies(u).map((c) => [
-    c.uid, c.id, c.variant === "shiny" ? 1 : 0, c.level, c.at ?? 0, c.trained ? 1 : 0,
-    slotsHolding(u, c.uid).reduce((m, s) => m | (TEAM_BIT[s.field] ?? 0), 0),
-    c.exp, // exact EXP: Donate Duplicates keeps the same best copy the server does
-  ]);
-}
 
 // Local saver — writes trainerData.json (in TRAINERDATA_DIR) & marks dirty
 import {
@@ -2414,7 +2406,7 @@ app.get("/api/user-pokemon", (req, res) => {
     // Pokédex (ever caught; never drops): { id: 1 normal | 2 shiny | 3 both }.
     pokedex: u.pokedex ?? {},
     // Collection: every copy, one entry each (docs/adr/0001), for the box grid.
-    // [uid, id, shiny 0|1, level, caughtAt|0, trained 0|1, teams bitmask (1 casual, 2 ranked, 4 showcase), exp]
+    // [uid, id, shiny 0|1, level, caughtAt|0, trained 0|1, teams bitmask (1 casual, 2 ranked, 4 showcase), exp, Special variant|null]
     copies: copyRows(u),
     nonShinyDustEarnedThisWeek: u.nonShinyDustEarnedThisWeek ?? 0,
     // One-time notices (services/notices.js); the Teams page shows the

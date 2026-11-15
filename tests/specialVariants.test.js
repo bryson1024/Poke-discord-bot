@@ -41,6 +41,13 @@ import { flattenTrainerSprites } from "../utils/dataLoader.js";
 import { slotView, buildShowcaseView } from "../utils/render/teamView.js";
 import { pokemonDetail } from "../services/pokemonDetail.js";
 import { sightingView } from "../utils/render/catchCard.js";
+import * as copyRowsModule from "../services/copyRows.js";
+import { duplicateRows, multiSelectBlock } from "../public/picker-pokemon/bulkRules.js";
+import { copiesOf as dashboardCopiesOf, trainedCopies as dashboardTrained } from "../public/picker-pokemon/copyChoice.js";
+import { pokemonSprite as recordSprite } from "../public/battlerecords/records.js";
+import * as publicSprites from "../public/spriteconfig.js";
+import { levelsForUser } from "../utils/training.js";
+import { powersFromLevels } from "../utils/battle/power.js";
 
 const pokemonData = JSON.parse(readFileSync(new URL("../pokemonData.json", import.meta.url), "utf8"));
 const economy = {
@@ -428,6 +435,52 @@ section("sprites");
 {
   const s = sightingView({ id: 7, variant: "squad-leader" });
   assertEqual([s.name, s.variant, s.shiny], ["Squirtle Squad Leader", "squad-leader", false], "a broadcast sighting card shows the Leader");
+}
+
+section("dashboard");
+{
+  const rowsOf = (u) => copyRowsModule.copyRows?.(u) ?? [];
+  const { u, p5, p30, leader } = squad();
+  u.displayedPokemon = [{ id: 7, variant: "squad-leader", uid: leader }];
+  normalizeBox(u);
+  const rows = rowsOf(u);
+  const byUid = Object.fromEntries(rows.map((r) => [r[0], r]));
+  assertEqual(byUid[leader]?.slice(1, 9), [7, 0, 25, u.box[leader].at ?? 0, 0, 1, u.box[leader].exp, "squad-leader"], "the Leader's copy row: index 8 is its Special variant");
+  assertEqual([byUid[p5]?.[8], byUid[p30]?.[8], byUid[p30]?.length], [null, null, 9], "plain rows carry null at index 8");
+
+  const pokemonData = JSON.parse(readFileSync(new URL("../pokemonData.json", import.meta.url), "utf8"));
+  const dupes = duplicateRows(u.pokemon, pokemonData, {}, rows);
+  assertEqual(dupes.map((d) => [d.pokeId, d.variant, d.uids]), [[7, "normal", [p5]]], "Donate Duplicates keeps the best plain Squirtle and never offers the Leader");
+  const v = { cc: 0 };
+  plain(v, 5);
+  grantSpecial(v, "squad-leader");
+  normalizeBox(v);
+  assertEqual(duplicateRows(v.pokemon, pokemonData, {}, rowsOf(v)), [], "a plain Squirtle beside the Leader is not a duplicate");
+  const w = { cc: 0 };
+  grantSpecial(w, "squad-leader");
+  normalizeBox(w);
+  const ms = (x) => multiSelectBlock(7, { pokemon: x.pokemon, pokemonData, savedTeam: [], trained: {}, copies: rowsOf(x) });
+  assertEqual(ms(w)?.title, "🔒 Kept for Good", "Multi-select can't take the Leader");
+  assertEqual(ms(v), null, "with a plain Squirtle beside it, Multi-select can take the plain one");
+
+  const data = { copies: rows, trained: { [`7:squad-leader`]: [{ uid: leader, rev: 1, tmMoves: [] }] } };
+  assertEqual(dashboardCopiesOf(data, 7, "normal").map((c) => c.uid).sort(), [p5, p30].sort(), "the copy chooser's plain Squirtle never lists the Leader");
+  assertEqual(dashboardCopiesOf(data, 7, "squad-leader").map((c) => c.uid), [leader], "the Leader is its own line in the chooser");
+  assertEqual(dashboardTrained(data, 7, "squad-leader").map((c) => c.uid), [leader], "trained copies are read under the Leader's key");
+
+  const levels = levelsForUser(u);
+  assertEqual([levels["7:normal"], levels["7:squad-leader"]], [30, 25], "levels list the Leader's line apart from plain Squirtle");
+  const s25 = computeStats(LEADER_STATS, 25);
+  assertEqual(powersFromLevels({ "7:squad-leader": 25 })["7:squad-leader"], s25.hp + s25.atk + s25.def + s25.spa + s25.spd + s25.spe, "the Leader's Power uses its own stats");
+}
+{
+  assertEqual(recordSprite({ speciesId: 7, variant: "squad-leader" }), "/public/sprites/pokemon/special/normal/squad-leader.gif", "Battle Records show the Leader's sprite");
+  assertEqual(recordSprite({ speciesId: 7, variant: "squad-member" }), "/public/sprites/pokemon/special/normal/squad-member.gif", "and a Squad member's look");
+  assertEqual(recordSprite({ speciesId: 7, variant: "shiny" }), "/public/sprites/pokemon/shiny/7.gif", "other sprites are unchanged");
+  const names = Object.fromEntries(Object.entries(SPECIAL_VARIANTS).map(([k, e]) => [k, e.name]));
+  assertEqual(publicSprites.SPECIAL_NAMES, names, "the dashboard's Special variant names match the catalog");
+  assertEqual(publicSprites.specialSprite?.("squad-leader", "grayscale"), "/public/sprites/pokemon/special/grayscale/squad-leader.gif", "specialSprite builds the grayscale path");
+  assertEqual([publicSprites.rowVariant?.(["c", 7, 0, 1, 0, 0, 0, 0, "squad-leader"]), publicSprites.rowVariant?.(["c", 7, 1, 1, 0, 0, 0, 0, null]), publicSprites.rowVariant?.(["c", 7, 0, 1, 0, 0, 0, 0])], ["squad-leader", "shiny", "normal"], "rowVariant reads a copy row's Variant (older 8-field rows too)");
 }
 
 finish();

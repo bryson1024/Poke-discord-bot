@@ -7,7 +7,8 @@
 
 import { duplicateRows, pickedRows, multiSelectBlock, onlyVariant } from "../public/picker-pokemon/bulkRules.js";
 import { bulkDonate, donatableDuplicates } from "../utils/bulkDonate.js";
-import { normalizeBox, allCopies, slotsHolding, copiesOf } from "../services/box.js";
+import { normalizeBox, copiesOf } from "../services/box.js";
+import { copyRows } from "../services/copyRows.js";
 import { readFileSync } from "fs";
 
 let testsRun = 0;
@@ -95,15 +96,10 @@ const ECONOMY = {
   rollDust: () => 0,
 };
 
-// The per-copy rows /api/user-pokemon sends (bot_final.js copyRows).
-const TEAM_BITS = { displayedPokemon: 1, battleTeam: 2, showcaseTeam: 4 };
+// The per-copy rows /api/user-pokemon sends (services/copyRows.js).
 function copyRowsOf(user) {
   normalizeBox(user);
-  return allCopies(user).map((c) => [
-    c.uid, c.id, c.variant === "shiny" ? 1 : 0, c.level, c.at ?? 0, c.trained ? 1 : 0,
-    slotsHolding(user, c.uid).reduce((m, s) => m | (TEAM_BITS[s.field] ?? 0), 0),
-    c.exp,
-  ]);
+  return copyRows(user);
 }
 
 // The server in the same state the dashboard sees.

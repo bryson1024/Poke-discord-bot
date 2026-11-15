@@ -15,6 +15,8 @@
 //              system, D-T10): only untrained copies count here.
 // ==========================================================
 
+import { SPECIAL_NAMES } from "../spriteconfig.js";
+
 const trainedCount = (trained, pid, variant) => (trained?.[`${Number(pid)}:${variant}`] ?? []).length;
 
 function countsOf(pokemon, pid) {
@@ -59,8 +61,9 @@ const byExpThenUid = (a, b) => a.exp - b.exp || (a.uid < b.uid ? -1 : a.uid > b.
 
 function duplicateRowsFromCopies(pokemonData, copies) {
   const lines = new Map(); // "id:variant" → untrained copies
-  for (const [uid, id, shiny, level, , isTrained, teams, exp] of copies) {
+  for (const [uid, id, shiny, level, , isTrained, teams, exp, special] of copies) {
     if (isTrained || !pokemonData[id]) continue; // server rejects unknown IDs
+    if (special) continue; // a Special variant (the Squirtle Squad Leader) is kept for good
     const key = `${Number(id)}:${shiny ? "shiny" : "normal"}`;
     if (!lines.has(key)) lines.set(key, []);
     lines.get(key).push({ uid, level, teams, exp: Number(exp ?? 0) });
@@ -92,9 +95,15 @@ export function pickedRows(rows, picked) {
 }
 
 // Why a card can't be picked in Multi-select, or null if it can.
-export function multiSelectBlock(pid, { pokemon, pokemonData, savedTeam, trained = {} }) {
+export function multiSelectBlock(pid, { pokemon, pokemonData, savedTeam, trained = {}, copies = [] }) {
   const name = pokemonData[pid]?.name || `#${pid}`;
-  const owned = countsOf(pokemon, pid);
+  // A Special copy (copy row [8], the Squirtle Squad Leader) counts as normal but is kept for good.
+  const kept = (Array.isArray(copies) ? copies : []).filter((r) => r[1] === Number(pid) && r[8]);
+  const counted = countsOf(pokemon, pid);
+  const owned = { normal: counted.normal - kept.length, shiny: counted.shiny, any: counted.any - kept.length };
+  if (kept.length && owned.any === 0) {
+    return { title: "🔒 Kept for Good", message: `The ${SPECIAL_NAMES[kept[0][8]] ?? name} is kept for good: it can't be donated.` };
+  }
 
   if (owned.normal > 1 || owned.shiny > 1) {
     const have = owned.normal > 1 ? `${owned.normal} ${name}` : `${owned.shiny} shiny ${name}`;

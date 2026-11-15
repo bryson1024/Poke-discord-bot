@@ -18,7 +18,9 @@ export const KIND_LABEL = Object.freeze({
 
 export const SUMMARY_WINDOW = 20;
 
-export const pokemonSprite = (m) => (m.megaForm
+import { isSpecial, specialSprite } from "../spriteconfig.js";
+
+export const pokemonSprite = (m) => (isSpecial(m.variant) ? specialSprite(m.variant) : m.megaForm
   ? `/public/sprites/pokemon/mega/${m.variant === "shiny" ? "shiny" : "normal"}/${m.megaForm}.gif`
   : `/public/sprites/pokemon/${m.variant === "shiny" ? "shiny" : "normal"}/${m.speciesId}.gif`);
 export const trainerSprite = (file) => (file ? `/public/sprites/trainers_2/${file}` : "/public/sprites/items/pokeball.png");

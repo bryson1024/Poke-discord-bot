@@ -8,6 +8,7 @@
 
 import fs from "fs";
 import { addCopy } from "../services/box.js";
+import { isSpecialVariant } from "./specialVariants.js";
 import {
   LEVEL_CAP, CATCH_RANGES, CATCH_SKEW, CATCH_TAIL_CHANCE, DUPLICATE_LEVEL_SHARE,
 } from "./battle/tuning.js";
@@ -99,6 +100,10 @@ export function levelsForUser(user) {
     for (const variant of ["normal", "shiny"]) {
       if ((counts?.[variant] ?? 0) > 0) out[trainingKey(id, variant)] = getTraining(user, id, variant).level;
     }
+  }
+  // A Special copy (the Squirtle Squad Leader) is its own line; its count sits under normal.
+  for (const rec of Object.values(user.box ?? {})) {
+    if (isSpecialVariant(rec?.variant)) out[trainingKey(rec.id, rec.variant)] = getTraining(user, rec.id, rec.variant).level;
   }
   return out;
 }

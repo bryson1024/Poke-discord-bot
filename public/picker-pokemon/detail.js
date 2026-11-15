@@ -23,11 +23,14 @@ import { scanFx } from "/public/shared/spriteFx.js";
 import { pageHref } from "/public/shared/shell.js";
 import { openTeachDialog } from "/public/shared/teachTm.js";
 import { moveMeta } from "/public/shared/moveMeta.js";
+import { isSpecial, specialSprite } from "/public/spriteconfig.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const dex = (id) => `#${String(id).padStart(4, "0")}`;
 const STAT_LABELS = [["hp", "HP"], ["atk", "Atk"], ["def", "Def"], ["spa", "SpA"], ["spd", "SpD"], ["spe", "Spe"]];
-const sprite = (id, variant) => `/public/sprites/pokemon/${variant === "shiny" ? "shiny" : "normal"}/${id}.gif`;
+const sprite = (id, variant) => (isSpecial(variant) ? specialSprite(variant) : `/public/sprites/pokemon/${variant === "shiny" ? "shiny" : "normal"}/${id}.gif`);
+// A copy entry's label: a Special variant's own name (the Squirtle Squad Leader; the server sends it).
+const variantLabel = (v, copies) => (v === "shiny" ? "✨ Shiny" : copies?.[v]?.name ?? "Normal");
 const RANKED_LEVEL = 50;
 
 let dialog = null;
@@ -66,7 +69,7 @@ function trainedRows(copies) {
   const rows = [];
   for (const [v, c] of Object.entries(copies)) {
     if (!c.trained?.length) continue;
-    rows.push(`<p class="dt-muted" style="margin:6px 0 2px">${v === "shiny" ? "✨ Shiny" : "Normal"}: untrained ×${c.plain} · trained ×${c.trained.length}</p>`);
+    rows.push(`<p class="dt-muted" style="margin:6px 0 2px">${variantLabel(v, copies)}: untrained ×${c.plain} · trained ×${c.trained.length}</p>`);
     for (const t of c.trained) {
       const where = [t.teams.display ? `Casual slot ${t.teams.display}` : "", t.teams.battle ? `Ranked slot ${t.teams.battle}` : ""].filter(Boolean).join(" · ") || "Not on a team";
       rows.push(`<div class="dt-move"><span>★ Trained · ${t.tmMoves.map((m) => esc(m.name)).join(", ")}</span><small class="dt-muted">${where}</small></div>`);
@@ -99,6 +102,11 @@ function statsSection(c) {
 function collectionActions(d, ctx, opts) {
   const copies = d.copies ?? {};
   const c = copies[shownVariant];
+  // A Special variant (the Squirtle Squad Leader) is kept for good: only "Use on a team".
+  if (isSpecial(shownVariant)) {
+    return `<button type="button" class="cc-btn" data-act="donate" disabled title="Kept for good">Donate</button>
+    <a class="cc-btn cc-btn--primary" href="${pageHref("/public/teams/", ctx.userId)}">Use on a team</a>`;
+  }
   const onTeam = !!(c && (c.teams.display || c.teams.battle));
   return `${ctx.canEvolve?.(d.id) ? `<button type="button" class="cc-btn" data-act="evolve">Evolve</button>` : ""}
     <button type="button" class="cc-btn" data-act="donate"${onTeam ? ' disabled title="On a team: remove it first"' : ""}>Donate ${shownVariant === "shiny" ? "shiny" : ""}</button>
@@ -112,7 +120,7 @@ function render(d, ctx, opts) {
   if (!owned.includes(shownVariant)) shownVariant = owned[0] ?? "normal";
   const c = copies[shownVariant];
   const variantToggle = owned.length > 1
-    ? `<div class="dt-seg" role="group" aria-label="Copy">${owned.map((v) => `<button type="button" data-variant="${v}" aria-pressed="${v === shownVariant}">${v === "shiny" ? "✨ Shiny" : "Normal"}</button>`).join("")}</div>`
+    ? `<div class="dt-seg" role="group" aria-label="Copy">${owned.map((v) => `<button type="button" data-variant="${v}" aria-pressed="${v === shownVariant}">${variantLabel(v, copies)}</button>`).join("")}</div>`
     : "";
   const evo = [...d.evolvesFrom.map((e) => ({ ...e, rel: "from" })), { id: d.id, name: d.name, rel: "this" }, ...d.evolvesTo.map((e) => ({ ...e, rel: "to" }))];
   const art = owned.length ? sprite(d.id, shownVariant) : `/public/sprites/pokemon/grayscale/${d.id}.gif`;
@@ -128,14 +136,14 @@ function render(d, ctx, opts) {
     </div>
     <div class="dt-stage${shownVariant === "shiny" && owned.length ? " is-shiny" : ""}"${shownVariant === "shiny" && owned.length ? ` data-fx="shiny" data-fx-seed="${d.id}"` : ""}>
       ${variantToggle}
-      <img src="${art}" alt="${esc(d.name)}${shownVariant === "shiny" ? " (shiny)" : ""}" class="${owned.length ? "" : "silhouette"}" onerror="this.onerror=null;this.src='/public/sprites/items/pokeball.png'">
+      <img src="${art}" alt="${esc(copies[shownVariant]?.name ?? d.name)}${shownVariant === "shiny" ? " (shiny)" : ""}" class="${owned.length ? "" : "silhouette"}" onerror="this.onerror=null;this.src='/public/sprites/items/pokeball.png'">
     </div>
     ${opts.megaName ? `<p class="dt-note">On this team it battles as <b>${esc(opts.megaName)}</b>, whose stats differ from these.</p>` : ""}
     ${d.flavor ? `<p class="dt-flavor">${esc(d.flavor)}</p>` : ""}
     <section class="dt-sec"><h3>Your copies</h3>
-      ${owned.length ? owned.map((v) => `<div class="dt-copy"><img src="${sprite(d.id, v)}" alt=""><span>${v === "shiny" ? "✨ Shiny" : "Normal"} ×${copies[v].count} · <b>Lv ${copies[v].level}</b><br><small>${slotLine(copies[v], v, opts)}</small></span></div>`).join("") : `<p class="dt-muted">Not caught yet.</p>`}
+      ${owned.length ? owned.map((v) => `<div class="dt-copy"><img src="${sprite(d.id, v)}" alt=""><span>${variantLabel(v, copies)} ×${copies[v].count} · <b>Lv ${copies[v].level}</b><br><small>${slotLine(copies[v], v, opts)}</small></span></div>`).join("") : `<p class="dt-muted">Not caught yet.</p>`}
       ${trainedRows(copies)}
-      ${d.tm?.enabled && c ? `<button type="button" class="cc-btn" data-act="teach">Teach a TM${owned.length > 1 ? ` (${shownVariant === "shiny" ? "shiny" : "normal"})` : ""}</button>` : ""}
+      ${d.tm?.enabled && c ? `<button type="button" class="cc-btn" data-act="teach">Teach a TM${owned.length > 1 ? ` (${shownVariant === "shiny" ? "shiny" : esc(c.name ?? "normal")})` : ""}</button>` : ""}
     </section>
     ${d.megaForms?.length ? `<section class="dt-sec"><h3>Mega forms</h3><div class="dt-forms">${d.megaForms.map((f) => `<div class="dt-form"><img src="/public/sprites/pokemon/mega/${shownVariant === "shiny" ? "shiny" : "normal"}/${esc(f.id)}.gif" alt=""><b>${esc(f.name)}</b><small>${f.unlocked[shownVariant] ? "Unlocked" : "Locked"}</small></div>`).join("")}</div><p class="dt-muted">Forms of ${esc(d.name)}: they never count as Pokédex entries.</p></section>` : ""}
     ${c ? `${statsSection(c)}
