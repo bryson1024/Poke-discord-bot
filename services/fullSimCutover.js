@@ -31,9 +31,9 @@ import { chosenMoves, copyKey } from "./movesets.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
 import { copyTraining } from "./box.js";
 import { getTraining } from "../utils/training.js";
-import { isFullSimEnabled, CUTOVER_VERSION } from "../config/fullSim.js";
+import { isFullSimEnabled, CUTOVER_VERSION, markNewPlayer } from "../config/fullSim.js";
 
-export { CUTOVER_VERSION };
+export { CUTOVER_VERSION, markNewPlayer };
 const LEGACY = {}; // an env with the full sim off: today's data
 const MAX = 4;
 

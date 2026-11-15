@@ -15,6 +15,10 @@ import { startRun, finishOpenRun } from "../utils/challenge/runChallenge.js";
 import { challengeRecord } from "../utils/fightRecordBuild.js";
 import { closeSimPool } from "../utils/battle/simPool.js";
 import { createNewUser } from "../utils/userSchema.js";
+import { markNewPlayer, CUTOVER_VERSION } from "../config/fullSim.js";
+import { runCutover } from "../services/fullSimCutover.js";
+import { buildTeam } from "../utils/battle/runBattle.js";
+import { initializeUserSchema } from "../utils/trainerDataHelper.js";
 
 await loadFullSim();
 
@@ -63,6 +67,26 @@ section("An Elite Four record after the switch turns on");
     delete process.env.FULL_SIM_ENABLED;
   }
 }
+
+section("A player who joins after the switch is on");
+withSwitch(true, () => {
+  // A first chat message builds the record from {} (bot_final.js normalizeUserSchema).
+  const fresh = markNewPlayer({});
+  assertEqual(fresh.fullSimCutover, CUTOVER_VERSION, "a record built for a first chat message counts as cut over");
+  assertEqual(initializeUserSchema("N2", "New").fullSimCutover, CUTOVER_VERSION, "so does trainerDataHelper's new record");
+  fresh.id = "N";
+  fresh.pokemon = { 1: { normal: 1, shiny: 0 } };
+  fresh.training = { "1:normal": { exp: 40 ** 3 } };
+  fresh.displayedPokemon = [{ id: 1, variant: "normal" }];
+  const before = buildTeam(fresh)[0].moves ?? autoMoveset(1, 40);
+  assertEqual(runCutover({ N: fresh }), 0, "the next start's cutover skips them");
+  assertEqual(buildTeam(fresh)[0].moves ?? autoMoveset(1, 40), before, "so their moves don't change at a restart");
+  const old = { id: "O" };
+  markNewPlayer(old, {});
+  assertEqual(old.fullSimCutover, undefined, "with the switch off nothing is stamped");
+  const existing = { id: "E", fullSimCutover: undefined, pokemon: {}, displayedPokemon: [] };
+  assertEqual(runCutover({ E: existing }), 1, "a player from before the switch is still cut over once");
+});
 
 await closeSimPool();
 finish();

@@ -24,3 +24,16 @@ export function isFullSimEnabled(env = process.env) {
   const source = env && typeof env === "object" ? env : process.env;
   return TRUE.has(String(source.FULL_SIM_ENABLED ?? "").trim().toLowerCase());
 }
+
+/**
+ * A brand-new player record (IN PLACE): with the switch on they have no
+ * moves from before it to keep, so the next start's cutover
+ * (services/fullSimCutover.js runCutover) must skip them. createNewUser
+ * does this too; this covers records built another way (bot_final.js
+ * normalizeUserSchema for a first chat message, utils/trainerDataHelper.js).
+ * Never for an existing record.
+ */
+export function markNewPlayer(user, env = process.env) {
+  if (user && isFullSimEnabled(env)) user.fullSimCutover ??= CUTOVER_VERSION;
+  return user;
+}

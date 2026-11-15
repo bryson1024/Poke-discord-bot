@@ -308,6 +308,12 @@ function playStep(user, userId, members, now) {
 // something fainted; anything invalid revives nothing) and plays that fight.
 function breakThenPlay(user, userId, slot, now) {
   const run = user.challenge.run;
+  // A save while a fight was on the sim worker (full sim) can hold a run
+  // whose fight never finished. No HP yet: its first fight never finished,
+  // so play it again. Breaks already recorded for this fight are dropped,
+  // so the retry records it once (breaks[k] is the break after fight k).
+  if (!Array.isArray(run.hp)) return playStep(user, userId, run.team, now);
+  if (run.breaks.length > run.next - 1) run.breaks.length = Math.max(0, run.next - 1);
   const offered = run.hp.includes(0);
   const carried = carryHp(run.team, run.hp, run.status, offered ? slot : null);
   run.breaks.push({ offered, slot: carried.slot });
