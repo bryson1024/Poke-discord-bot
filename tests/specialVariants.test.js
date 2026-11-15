@@ -20,6 +20,12 @@ import { giftPokemon } from "../commands/gift.js";
 import { teachOptions, teachTm } from "../services/tmTeaching.js";
 import { isOnTeam } from "../services/box.js";
 import { readFileSync } from "fs";
+import { normalizeTeam } from "../utils/teamNormalize.js";
+import { prepareTeamSelection, normalizeDisplayedTeam } from "../services/megaTeam.js";
+import * as battleTeam from "../services/battleTeam.js";
+import { prepareShowcaseSelection, normalizeShowcase } from "../services/showcaseTeam.js";
+import { parseTeamCopy, applyTeamCopy } from "../services/teamCopy.js";
+import { normalizeEquipment, teamSlots } from "../services/heldItems.js";
 
 const pokemonData = JSON.parse(readFileSync(new URL("../pokemonData.json", import.meta.url), "utf8"));
 const economy = {
@@ -240,6 +246,70 @@ section("protections");
   normalizeCustomPokemon(u);
   normalizeBox(u);
   assertEqual([u.customPokemon?.[leader]?.variant, u.box[leader]?.variant], ["squad-leader", "squad-leader"], "normalizing keeps the trained Leader as the Leader");
+}
+
+section("teams");
+{
+  const slots = normalizeTeam([{ id: 7, variant: "normal" }, { id: 7, variant: "squad-leader" }]);
+  assertEqual(slots.map((s) => s.variant), ["normal", "squad-leader"], "a team holds plain Squirtle and the Leader as two slots");
+}
+{
+  const { u, p30, leader } = squad();
+  const casual = prepareTeamSelection(u, [{ id: 7, variant: "normal", uid: p30 }, { id: 7, variant: "squad-leader", uid: leader }]);
+  assertTrue(casual.ok, "a Casual team with the Leader saves");
+  assertEqual(casual.team?.map((s) => [s.variant, s.uid]), [["normal", p30], ["squad-leader", leader]], "the Casual team keeps the Leader's uid");
+  assertEqual(prepareTeamSelection(u, [{ id: 7, variant: "normal", uid: leader }]).code, "unknown_copy", "a plain Squirtle slot can't name the Leader");
+
+  const show = prepareShowcaseSelection(u, [{ id: 7, variant: "squad-leader", uid: leader }, { id: 7, variant: "normal" }]);
+  assertTrue(show.ok, "a Showcase with the Leader saves");
+  assertEqual(show.team?.[0]?.uid, leader, "the Showcase keeps the Leader's uid");
+  assertTrue(show.team?.[1]?.uid && show.team[1].uid !== leader, "a plain Squirtle Showcase slot gets a plain copy");
+  assertEqual(prepareShowcaseSelection(u, [{ id: 7, variant: "normal", uid: leader }]).code, "unknown_copy", "a plain Showcase slot can't name the Leader");
+
+  const ranked = battleTeam.prepareBattleTeamSelection(u, [{ id: 7, variant: "normal", uid: p30 }, { id: 7, variant: "squad-leader", uid: leader }]);
+  assertEqual([ranked.code, ranked.error], ["special_ranked", "The Squirtle Squad Leader can't join the Ranked team."], "a Ranked team with the Leader is refused");
+}
+{
+  // Load-time: a stored Ranked team holding the Leader loses that slot; the Casual team keeps it.
+  const { u, p30, leader } = squad();
+  const both = () => [{ id: 7, variant: "normal", uid: p30 }, { id: 7, variant: "squad-leader", uid: leader }];
+  u.displayedPokemon = both();
+  u.battleTeam = both();
+  battleTeam.normalizeBattleTeam(u);
+  assertEqual(u.battleTeam.map((s) => s.uid), [p30], "load-time trim drops Special slots from battleTeam");
+  normalizeDisplayedTeam(u);
+  assertEqual(u.displayedPokemon.map((s) => [s.variant, s.uid]), [["normal", p30], ["squad-leader", leader]], "the Casual team keeps the Leader at load");
+  u.battleTeam = both();
+  assertEqual([battleTeam.trimSpecialFromBattleTeam?.(u), battleTeam.trimSpecialFromBattleTeam?.(u)], [true, false], "trimSpecialFromBattleTeam reports a change once");
+}
+{
+  // Ghost-slot filter: only the Leader owned (its count sits under normal).
+  const u = { cc: 0 };
+  const leader = grantSpecial(u, "squad-leader").uid;
+  u.displayedPokemon = [{ id: 7, variant: "squad-leader", uid: leader }];
+  u.showcaseTeam = [{ id: 7, variant: "squad-leader", uid: leader }];
+  normalizeDisplayedTeam(u);
+  assertEqual(u.displayedPokemon.map((s) => [s.variant, s.uid]), [["squad-leader", leader]], "the ghost-slot filter keeps a Leader-only slot");
+  normalizeBox(u);
+  assertEqual(u.displayedPokemon.map((s) => s.uid), [leader], "normalizeBox keeps the slot on the Leader");
+  normalizeShowcase(u);
+  assertEqual(u.showcaseTeam.map((s) => [s.variant, s.uid]), [["squad-leader", leader]], "the Showcase keeps a Leader-only slot");
+}
+{
+  const parsed = parseTeamCopy({ copyFrom: "display", copiedKeys: ["7:squad-leader"] }, "battle");
+  assertTrue(parsed.ok && parsed.copy?.keys?.[0] === "7:squad-leader", "teamCopy accepts a Special variant key");
+  const { u, p30, leader } = squad();
+  const done = applyTeamCopy(u, { from: "battle", to: "display", keys: ["7:squad-leader"] }, [{ id: 7, variant: "normal", uid: p30 }, { id: 7, variant: "squad-leader", uid: leader }]);
+  assertEqual(done, ["7:squad-leader"], "a copied Leader key matches the Leader's slot");
+}
+{
+  const { u, p30, leader } = squad();
+  u.items = { leftovers: 1 };
+  u.displayedPokemon = [{ id: 7, variant: "normal", uid: p30 }, { id: 7, variant: "squad-leader", uid: leader }];
+  u.equipment = { rev: 0, teams: { display: { [`u:${leader}`]: "leftovers" } } };
+  assertEqual(teamSlots(u, "display").map((s) => s.variant), ["normal", "squad-leader"], "held-item team slots keep the Leader beside plain Squirtle");
+  normalizeEquipment(u);
+  assertEqual(u.equipment?.teams?.display?.[`u:${leader}`], "leftovers", "a held item on the Leader survives normalizeEquipment");
 }
 
 finish();

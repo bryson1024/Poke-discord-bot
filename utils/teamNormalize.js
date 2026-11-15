@@ -1,6 +1,8 @@
+import { isSpecialVariant } from "./specialVariants.js";
+
 export function normVariant(v) {
   const s = String(v ?? "normal").toLowerCase().trim();
-  return s === "shiny" ? "shiny" : "normal";
+  return s === "shiny" ? "shiny" : isSpecialVariant(s) ? s : "normal";
 }
 
 export function toTeamObj(entry) {

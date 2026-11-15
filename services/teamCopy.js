@@ -11,8 +11,10 @@
 // ==========================================================
 
 import { chosenMoves, setMoveset, TEAM_TYPES } from "./movesets.js";
+import { normalizeVariant, VARIANT_KEYS } from "../utils/specialVariants.js";
 
-const KEY = /^([1-9]\d{0,4}):(normal|shiny)$/;
+// Catalog keys are lowercase words and hyphens, so they need no escaping.
+const KEY = new RegExp(`^([1-9]\\d{0,4}):(${VARIANT_KEYS.join("|")})$`);
 export const MAX_COPIED_KEYS = 6;
 
 /**
@@ -38,7 +40,7 @@ export function parseTeamCopy(body, teamType) {
  * @returns the keys whose moves were copied
  */
 export function applyTeamCopy(user, { from, to, keys }, savedTeam) {
-  const onTeam = new Set((savedTeam ?? []).map((s) => `${Number(s.id)}:${s.variant === "shiny" ? "shiny" : "normal"}`));
+  const onTeam = new Set((savedTeam ?? []).map((s) => `${Number(s.id)}:${normalizeVariant(s.variant)}`));
   const done = [];
   for (const key of keys) {
     if (!onTeam.has(key)) continue;

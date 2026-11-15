@@ -15,15 +15,16 @@
 // ==========================================================
 
 import { megaFieldOf, megaFitsSlot } from "./megaTeam.js";
-import { copiesOf, copyOf } from "./box.js";
+import { copiesOf, copyOf, variantOf, ownsVariant } from "./box.js";
+import { normalizeVariant } from "../utils/specialVariants.js";
 import { getMega, megaFormGate } from "../utils/megas.js";
 import { isMegaCapabilityEnabled } from "../config/features.js";
 import { toTeamObj } from "../utils/economyRules.js";
 
 export const SHOWCASE_MAX = 6;
 const fail = (status, error, code) => ({ ok: false, status, error, code });
-const normV = (v) => (v === "shiny" ? "shiny" : "normal");
-const lineOf = (rec) => `${Number(rec?.id)}:${rec?.shiny ? "shiny" : "normal"}`;
+const normV = normalizeVariant;
+const lineOf = (rec) => `${Number(rec?.id)}:${variantOf(rec)}`;
 
 // A copy of this line not used yet in `used` (untrained first, best Level first).
 function freeCopy(user, id, variant, used) {
@@ -81,7 +82,7 @@ export function prepareShowcaseSelection(user, rawTeam, { env = process.env } = 
     const t = toTeamObj(entry);
     if (!t) return fail(400, "Invalid Pokémon.", "bad_team");
     const slot = { id: Number(t.id), variant: normV(t.variant) };
-    if (!(Number(user.pokemon?.[slot.id]?.[slot.variant]) > 0)) return fail(400, `You don't own that ${slot.variant === "shiny" ? "shiny " : ""}Pokémon.`, "unowned");
+    if (!ownsVariant(user, slot.id, slot.variant)) return fail(400, `You don't own that ${slot.variant === "shiny" ? "shiny " : ""}Pokémon.`, "unowned");
     let uid = null;
     if (entry && typeof entry === "object" && entry.uid != null) {
       const rec = copyOf(user, entry.uid);

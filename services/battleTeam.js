@@ -21,11 +21,13 @@
 // later milestone.
 // ==========================================================
 
-import { toTeamObj, normVariant } from "../utils/economyRules.js";
+import { toTeamObj } from "../utils/economyRules.js";
 import { getSpeciesEntry } from "../utils/speciesCatalog.js";
 import { megaFieldOf, megaFitsSlot, prepareTeamSelection } from "./megaTeam.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
 import { addNotice, NOTICE_KINDS } from "./notices.js";
+import { ownsVariant } from "./box.js";
+import { normalizeVariant, isSpecialVariant, specialVariant } from "../utils/specialVariants.js";
 
 export const BATTLE_TEAM_MAX_MYTHIC = 1;
 
@@ -47,14 +49,26 @@ export function cleanStoredTeam(user, raw) {
   }
   return team
     .map((t) => {
-      const slot = { id: Number(t?.id), variant: t?.variant === "shiny" ? "shiny" : "normal" };
+      const slot = { id: Number(t?.id), variant: normalizeVariant(t?.variant) };
       const mega = megaFieldOf(t);
       const uid = slotBoxUid(user, { ...slot, uid: t?.uid }) ?? slotCopyUid(user, { ...slot, uid: t?.uid }); // the slot's copy (docs/adr/0001)
       const out = mega && Number.isInteger(slot.id) && megaFitsSlot(user, slot, mega) ? { ...slot, mega } : slot;
       return uid ? { ...out, uid } : out;
     })
     .filter((t) => Number.isInteger(t.id))
-    .filter((t) => Number(user.pokemon?.[t.id]?.[t.variant] || 0) > 0);
+    .filter((t) => ownsVariant(user, t.id, t.variant));
+}
+
+/**
+ * IN PLACE: a Ranked team holds no Special variants (CONTEXT.md). Saving
+ * refuses them; this drops any that got stored anyway. The Pokémon stays in
+ * the collection. Idempotent. Returns true when a slot was removed.
+ */
+export function trimSpecialFromBattleTeam(user) {
+  if (!hasBattleTeam(user)) return false;
+  const before = user.battleTeam.length;
+  user.battleTeam = user.battleTeam.filter((s) => !isSpecialVariant(s?.variant));
+  return user.battleTeam.length !== before;
 }
 
 /**
@@ -93,6 +107,7 @@ export function normalizeBattleTeam(user) {
     return undefined;
   }
   user.battleTeam = cleanStoredTeam(user, user.battleTeam);
+  trimSpecialFromBattleTeam(user);
   trimBattleTeamMythics(user);
   return user.battleTeam;
 }
@@ -105,6 +120,8 @@ export function normalizeBattleTeam(user) {
 export function prepareBattleTeamSelection(user, rawTeam, opts = {}) {
   const prepared = prepareTeamSelection(user, rawTeam, opts);
   if (!prepared.ok) return prepared;
+  const special = prepared.team.find((s) => isSpecialVariant(s.variant));
+  if (special) return { ok: false, status: 400, code: "special_ranked", error: `The ${specialVariant(special.variant).name} can't join the Ranked team.` };
   const mythics = prepared.team.filter((s) => isMythicTier(s.id));
   if (mythics.length > BATTLE_TEAM_MAX_MYTHIC) {
     const names = mythics.map((s) => speciesName(s.id)).join(", ");
@@ -121,7 +138,7 @@ export function prepareBattleTeamSelection(user, rawTeam, opts = {}) {
 /** Is this exact copy (species + variant) on either team? */
 export function isOnAnyTeam(user, pokeId, variant) {
   const pid = Number(pokeId);
-  const v = normVariant(variant);
+  const v = normalizeVariant(variant);
   const on = (raw) => (Array.isArray(raw) ? raw : []).map(toTeamObj).filter(Boolean).some((t) => t.id === pid && t.variant === v);
   return on(user?.displayedPokemon) || on(user?.battleTeam);
 }

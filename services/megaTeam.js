@@ -33,6 +33,8 @@ import { getMega, megaFormGate, megaBattleEligibility, megaBattleProfile, MEGA_I
 import { unlockedForms, megaLineKey } from "./megaUnlocks.js";
 import { isMegaCapabilityEnabled } from "../config/features.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
+import { ownsVariant } from "./box.js";
+import { normalizeVariant } from "../utils/specialVariants.js";
 
 const fail = (status, error, code) => ({ ok: false, status, error, code });
 
@@ -66,7 +68,7 @@ export function normalizeDisplayedTeam(user) {
   // Normalize + remove ghosts (must own that specific variant)
   user.displayedPokemon = user.displayedPokemon
     .map((t) => {
-      const slot = { id: Number(t?.id), variant: t?.variant === "shiny" ? "shiny" : "normal" };
+      const slot = { id: Number(t?.id), variant: normalizeVariant(t?.variant) };
       const mega = megaFieldOf(t);
       // Any copy of the line (docs/adr/0001); trained copies are copies too.
       const uid = slotBoxUid(user, { ...slot, uid: t?.uid }) ?? slotCopyUid(user, { ...slot, uid: t?.uid });
@@ -74,11 +76,7 @@ export function normalizeDisplayedTeam(user) {
       return uid ? { ...out, uid } : out;
     })
     .filter((t) => Number.isInteger(t.id))
-    .filter((t) => {
-      const owned = user.pokemon?.[t.id];
-      if (!owned) return false;
-      return Number(owned?.[t.variant] || 0) > 0;
-    });
+    .filter((t) => ownsVariant(user, t.id, t.variant));
   return user.displayedPokemon;
 }
 
@@ -90,12 +88,6 @@ export function normalizeDisplayedTeam(user) {
  */
 export function prepareTeamSelection(user, rawTeam, { env = process.env } = {}) {
   if (!Array.isArray(rawTeam)) return fail(400, "Missing id/team", "bad_team");
-  const ownsVariant = (pid, variant) => {
-    const p = user.pokemon?.[pid];
-    if (!p) return false;
-    return (p[variant] ?? 0) > 0;
-  };
-
   // Parse (unchanged) + carry a well-formed mega field; anything else in
   // `mega` (wrong type, malformed id) is refused rather than silently dropped.
   const parsed = [];
@@ -143,7 +135,7 @@ export function prepareTeamSelection(user, rawTeam, { env = process.env } = {}) 
   if (normalized.length === 0 || normalized.length > 6) {
     return fail(400, "Team must be 1–6 unique slots (unique = Pokémon + variant).", "bad_size");
   }
-  const unowned = normalized.filter((slot) => !ownsVariant(slot.id, slot.variant));
+  const unowned = normalized.filter((slot) => !ownsVariant(user, slot.id, slot.variant));
   if (unowned.length) {
     const list = unowned.map((s) => `#${s.id} (${s.variant})`).join(", ");
     return fail(400, `Unowned Pokémon slots: ${list}`, "unowned");

@@ -84,6 +84,7 @@ import { normalizeEquipment, reconcileTeamEquipment, equipmentRev } from "./serv
 import { normalizeMegaUnlocks } from "./services/megaUnlocks.js";
 import { normalizeDisplayedTeam, prepareTeamSelection } from "./services/megaTeam.js";
 import { normalizeBattleTeam, prepareBattleTeamSelection, hasBattleTeam } from "./services/battleTeam.js";
+import { isSpecialVariant } from "./utils/specialVariants.js";
 import { normalizeNotices, peekNotices, clearNotices, NOTICE_KINDS } from "./services/notices.js";
 import { consolidateUserTrainers } from "./services/trainerConsolidation.js";
 import { pokemonDetail } from "./services/pokemonDetail.js";
@@ -1618,7 +1619,7 @@ function normalizeDisplayedPokemon(rawTeam, maxSize = 6) {
 
   const normVariant = (v) => {
     const s = String(v ?? "normal").toLowerCase().trim();
-    return s === "shiny" ? "shiny" : "normal";
+    return s === "shiny" ? "shiny" : isSpecialVariant(s) ? s : "normal";
   };
 
   const toTeamObj = (entry) => {

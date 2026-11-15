@@ -43,6 +43,7 @@ import { getQuantity, grantItem } from "./inventory.js";
 import { megaFieldOf } from "./megaTeam.js";
 import { isHeldItemCapabilityEnabled } from "../config/features.js";
 import { getMega } from "../utils/megas.js";
+import { normalizeVariant } from "../utils/specialVariants.js";
 
 export const TEAM_ID_PATTERN = /^(display|battle)(:[a-z0-9-]{1,32})?$/;
 export const EDITABLE_TEAMS = Object.freeze(["display", "battle"]);
@@ -52,7 +53,8 @@ export const MEMBER_PATTERN = /^(\d{1,5}:(normal|shiny)|u:c_[A-Za-z0-9]{10})$/;
 const DANGEROUS = new Set(["__proto__", "constructor", "prototype"]);
 const own = (o, k) => !!o && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k);
 const fail = (status, error, code, extra = {}) => ({ ok: false, status, error, code, ...extra });
-export const lineKey = (id, variant) => `${Number(id)}:${variant === "shiny" ? "shiny" : "normal"}`;
+// A Special variant's slot always names its copy (u:<uid>), so the line forms stay normal|shiny.
+export const lineKey = (id, variant) => `${Number(id)}:${normalizeVariant(variant)}`;
 export const memberKey = (s) => (s?.uid ? `u:${s.uid}` : lineKey(s.id, s.variant));
 const isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -113,7 +115,7 @@ export function teamSlots(user, teamId) {
   for (const t of raw) {
     const id = Number(typeof t === "object" && t ? t.id : t);
     if (!Number.isInteger(id)) continue;
-    const variant = t && typeof t === "object" && t.variant === "shiny" ? "shiny" : "normal";
+    const variant = normalizeVariant(t && typeof t === "object" ? t.variant : undefined);
     const uid = t && typeof t === "object" && typeof t.uid === "string" ? t.uid : null;
     const key = lineKey(id, variant); // each Pokémon once per team
     if (seen.has(key)) continue;

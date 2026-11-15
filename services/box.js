@@ -160,6 +160,10 @@ export const isSpecialCopy = (user, uid) => isSpecialVariant(copyOf(user, uid)?.
 /** How many copies of exactly this species + Variant the player owns (read from the box). */
 export const ownedCount = (user, id, variant) => copiesOf(user, id, variant).length;
 
+/** Owns this exact Variant: a Special one is read from the box (its derived count sits under normal). */
+export const ownsVariant = (user, id, variant) =>
+  (isSpecialVariant(variant) ? ownedCount(user, id, variant) : Number(user?.pokemon?.[id]?.[variant]) || 0) > 0;
+
 /** { exp, level } of one copy, or null. */
 export function copyTraining(user, uid) {
   const rec = copyOf(user, uid);

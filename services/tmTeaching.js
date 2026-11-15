@@ -27,14 +27,12 @@ import { getTraining } from "../utils/training.js";
 import { isTmEnabled } from "../config/tmFeatures.js";
 import { learnableMoves, chosenMoves, setMoveset, moveInfo, MAX_MOVES, TEAM_TYPES } from "./movesets.js";
 import { plainCount, customCopiesOf, slotCopyUid, slotBoxUid, createTrainedCopy, learnTmMove, assignLineSlotsToCopy } from "./ownership.js";
-import { copyTraining, ownedCount } from "./box.js";
-import { normalizeVariant, isSpecialVariant } from "../utils/specialVariants.js";
+import { copyTraining, ownsVariant as owns } from "./box.js";
+import { normalizeVariant } from "../utils/specialVariants.js";
 
 const TEAM_FIELD = { display: "displayedPokemon", battle: "battleTeam" };
 const fail = (status, error, code, extra = {}) => ({ ok: false, status, error, code, ...extra });
 const normV = normalizeVariant;
-// Owns the line: a Special variant is read from the box (the derived normal count also holds it).
-const owns = (user, id, v) => (isSpecialVariant(v) ? ownedCount(user, id, v) : Number(user?.pokemon?.[id]?.[v]) || 0) > 0;
 
 /**
  * The Level above `level` at which this species learns `move` by level-up,

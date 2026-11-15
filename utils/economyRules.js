@@ -3,6 +3,8 @@
 // their handlers (moved verbatim from bot_final.js; values unchanged).
 // ==========================================================
 
+import { isSpecialVariant } from "./specialVariants.js";
+
 // ==========================================================
 // 🧠 Pokémon Variant + Items Helpers (GLOBAL, SINGLE SOURCE)
 // ==========================================================
@@ -10,6 +12,8 @@ export function normVariant(v) {
   return String(v || "normal").toLowerCase() === "shiny" ? "shiny" : "normal";
 }
 
+// A team slot keeps a Special variant (the Squirtle Squad Leader); normVariant
+// stays normal-or-shiny for the routes that only know those two.
 export function toTeamObj(entry) {
   if (typeof entry === "number") return { id: entry, variant: "normal" };
   if (typeof entry === "string") {
@@ -19,7 +23,7 @@ export function toTeamObj(entry) {
   if (entry && typeof entry === "object") {
     const pid = Number(entry.id);
     if (!Number.isInteger(pid)) return null;
-    return { id: pid, variant: normVariant(entry.variant) };
+    return { id: pid, variant: isSpecialVariant(entry.variant) ? entry.variant : normVariant(entry.variant) };
   }
   return null;
 }
