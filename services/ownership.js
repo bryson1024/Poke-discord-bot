@@ -29,8 +29,9 @@ import { getMove } from "../utils/battle/data.js";
 import { expForLevel, floorLevel } from "../utils/training.js";
 import {
   COPY_UID_PATTERN, copyOf, copiesOf, spareCopies, isOnTeam, slotsHolding, takeCopy,
-  syncLine, registerDex, newCopyUid as newBoxUid, TEAM_FIELDS, normalizeBox,
+  syncLine, registerDex, newCopyUid as newBoxUid, TEAM_FIELDS, normalizeBox, variantOf, isSpecialCopy,
 } from "./box.js";
+import { isSpecialVariant, specialVariant, normalizeVariant, VARIANT_KEYS } from "../utils/specialVariants.js";
 
 // Users built or changed outside the normal load path (tests, older code
 // that still writes counts) are reconciled before any ownership decision.
@@ -44,9 +45,18 @@ const VARIANTS = new Set(["normal", "shiny"]);
 export const CUSTOM_UID_PATTERN = COPY_UID_PATTERN;
 const fail = (code, error, extra = {}) => ({ ok: false, code, error, ...extra });
 
+// A Special variant copy (the Squirtle Squad Leader) is kept for good: no
+// player-facing removal or transform ever takes it (docs/adr/0002-special-variants.md).
+const keptForGood = (v, action) => fail("special", `The ${specialVariant(v).name} is kept for good: it can't be ${action}.`);
+const specialsOf = (user, id) => Object.values(user?.box ?? {}).filter((r) => Number(r?.id) === Number(id) && isSpecialVariant(r?.variant));
+
+// Copies of exactly id:variant. The derived normal count includes Special
+// copies (they count as normal for older readers), so they're taken back out.
 const countOf = (user, id, variant) => {
+  if (isSpecialVariant(variant)) return specialsOf(user, id).filter((r) => r.variant === variant).length;
   const n = Number(user?.pokemon?.[id]?.[variant]);
-  return Number.isFinite(n) && n > 0 ? n : 0;
+  const counted = Number.isFinite(n) && n > 0 ? n : 0;
+  return Math.max(0, variant === "normal" ? counted - specialsOf(user, id).length : counted);
 };
 
 /** Customized (non-suspended) records of one line. */
@@ -79,18 +89,19 @@ export function pruneEmptyLine(user, id) {
   const e = user?.pokemon?.[id];
   if (!e) return;
   if ((e.normal ?? 0) <= 0 && (e.shiny ?? 0) <= 0) {
-    const hasCustom = customCopiesOf(user, id, "normal").length || customCopiesOf(user, id, "shiny").length;
+    const hasCustom = VARIANT_KEYS.some((v) => customCopiesOf(user, id, v).length);
     if (!hasCustom) delete user.pokemon[id];
   }
 }
 
 // Validate that `uids` name customized copies of this line with confirmed revs.
-function checkNamedCustoms(user, id, variant, uids, confirmRevs) {
+function checkNamedCustoms(user, id, variant, uids, confirmRevs, { allowSpecial = false, action = "removed" } = {}) {
   if (!Array.isArray(uids)) return fail("bad_request", "Invalid copy list.");
   if (new Set(uids).size !== uids.length) return fail("bad_request", "A copy is listed twice.");
   for (const uid of uids) {
     const c = typeof uid === "string" ? user?.customPokemon?.[uid] : null;
-    if (!c || c.suspended || Number(c.speciesId) !== Number(id) || c.variant !== variant) {
+    if (!allowSpecial && isSpecialCopy(user, uid)) return keptForGood(variantOf(copyOf(user, uid)), action);
+    if (!c || c.suspended || Number(c.speciesId) !== Number(id) || normalizeVariant(c.variant) !== variant) {
       return fail("unknown_copy", "That Pokémon copy no longer exists.");
     }
     if (confirmRevs?.[uid] !== (c.rev ?? 0)) {
@@ -101,12 +112,14 @@ function checkNamedCustoms(user, id, variant, uids, confirmRevs) {
 }
 
 // Validate player-picked untrained copies (`uids`) of this line.
-function checkNamedPlain(user, id, variant, uids, allowTeam) {
+function checkNamedPlain(user, id, variant, uids, allowTeam, { allowSpecial = false, action = "removed" } = {}) {
   if (!Array.isArray(uids)) return fail("bad_request", "Invalid copy list.");
   if (new Set(uids).size !== uids.length) return fail("bad_request", "A copy is listed twice.");
   for (const uid of uids) {
     const rec = copyOf(user, uid);
-    if (!rec || Number(rec.id) !== Number(id) || (rec.shiny ? "shiny" : "normal") !== variant) return fail("unknown_copy", "That Pokémon copy no longer exists.");
+    // Checked before the line match: the dashboard names the Leader's line as "normal".
+    if (!allowSpecial && rec && isSpecialVariant(variantOf(rec))) return keptForGood(variantOf(rec), action);
+    if (!rec || Number(rec.id) !== Number(id) || variantOf(rec) !== variant) return fail("unknown_copy", "That Pokémon copy no longer exists.");
     if (user?.customPokemon?.[uid] && !user.customPokemon[uid].suspended) return fail("bad_request", "Confirm TM-trained Pokémon individually.");
     if (!allowTeam && isOnTeam(user, uid)) return fail("on_team", "That Pokémon is on a team. Take it off the team first.");
   }
@@ -124,15 +137,19 @@ function checkNamedPlain(user, id, variant, uids, allowTeam) {
  */
 export function canRemoveCopies(user, { id, variant, n, uids = [], customUids = [], confirmRevs = {}, exact = false, allowTeam = false }) {
   ensureBox(user);
-  if (!VARIANTS.has(variant)) return fail("bad_request", "Invalid variant.");
+  // Only admin tools (allowTeam) may remove a Special variant.
+  if (isSpecialVariant(variant)) { if (!allowTeam) return keptForGood(variant, "donated or given away"); }
+  else if (!VARIANTS.has(variant)) return fail("bad_request", "Invalid variant.");
+  const opts = { allowSpecial: allowTeam, action: "donated or given away" };
   if (!Number.isInteger(n) || n < 1) return fail("bad_request", "Invalid count.");
   const owned = countOf(user, id, variant);
   if (owned < n) return fail("not_owned", "You don't own enough of that Pokémon.", { owned });
-  const named = checkNamedCustoms(user, id, variant, customUids, confirmRevs) ?? checkNamedPlain(user, id, variant, uids, allowTeam);
+  const named = checkNamedCustoms(user, id, variant, customUids, confirmRevs, opts) ?? checkNamedPlain(user, id, variant, uids, allowTeam, opts);
   if (named) return named;
   if (uids.length > n) return fail("bad_request", "Too many copies listed.");
   const picked = new Set(uids);
-  const teamPlain = copiesOf(user, id, variant).filter((c) => !c.trained && isOnTeam(user, c.uid)).sort((a, b) => a.exp - b.exp);
+  // Admin only: copies on a Team, and Special copies (never spares), may be taken too.
+  const teamPlain = copiesOf(user, id, variant).filter((c) => !c.trained && (isOnTeam(user, c.uid) || isSpecialVariant(c.variant))).sort((a, b) => a.exp - b.exp);
   const auto = [...spareCopies(user, id, variant), ...(allowTeam ? teamPlain : [])]
     .filter((c) => !picked.has(c.uid))
     .map((c) => c.uid);
@@ -176,10 +193,17 @@ export function removeCopies(user, args) {
  */
 export function canTransformCopy(user, { from, to, uid = null, confirmRev = undefined }) {
   ensureBox(user);
+  const special = [from?.variant, to?.variant].find(isSpecialVariant);
+  if (special) return keptForGood(special, "evolved or made shiny");
+  if (uid != null && isSpecialCopy(user, uid)) return keptForGood(variantOf(copyOf(user, uid)), "evolved or made shiny");
   if (!VARIANTS.has(from?.variant) || !VARIANTS.has(to?.variant)) return fail("bad_request", "Invalid variant.");
   if (!Number.isInteger(Number(from.id)) || !Number.isInteger(Number(to.id))) return fail("bad_request", "Invalid Pokémon.");
   if (Number(from.id) === Number(to.id) && from.variant === to.variant) return fail("bad_request", "Nothing to change.");
-  if (countOf(user, from.id, from.variant) < 1) return fail("not_owned", "You don't own that Pokémon.");
+  if (countOf(user, from.id, from.variant) < 1) {
+    // The only copy left is a Special one (counted as normal): it's kept, not unowned.
+    const kept = from.variant === "normal" && specialsOf(user, from.id)[0];
+    return kept ? keptForGood(kept.variant, "evolved or made shiny") : fail("not_owned", "You don't own that Pokémon.");
+  }
   if (uid != null) {
     const custom = user?.customPokemon?.[uid];
     if (custom && !custom.suspended) {
@@ -208,6 +232,7 @@ export function transformCopy(user, args) {
   const rec = copyOf(user, uid);
   rec.id = Number(to.id);
   if (to.variant === "shiny") rec.shiny = true; else delete rec.shiny;
+  delete rec.variant; // only plain copies transform (canTransformCopy refuses Special ones)
   rec.exp = Math.max(Number(rec.exp) || 0, expForLevel(floorLevel(Number(to.id))));
   for (const { field, index } of slotsHolding(user, uid)) {
     user[field][index].id = Number(to.id);
@@ -242,7 +267,7 @@ export function slotBoxUid(user, slot) {
   const uid = slot && typeof slot === "object" ? slot.uid : undefined;
   const rec = copyOf(user, uid);
   if (!rec) return null;
-  return Number(rec.id) === Number(slot.id) && (rec.shiny ? "shiny" : "normal") === (slot.variant === "shiny" ? "shiny" : "normal") ? uid : null;
+  return Number(rec.id) === Number(slot.id) && variantOf(rec) === normalizeVariant(slot.variant) ? uid : null;
 }
 
 /**
@@ -279,7 +304,7 @@ export function slotCopyUid(user, slot) {
   if (typeof uid !== "string" || !CUSTOM_UID_PATTERN.test(uid)) return null;
   const c = user?.customPokemon?.[uid];
   if (!c || c.suspended) return null;
-  return Number(c.speciesId) === Number(slot.id) && c.variant === (slot.variant === "shiny" ? "shiny" : "normal") ? uid : null;
+  return Number(c.speciesId) === Number(slot.id) && normalizeVariant(c.variant) === normalizeVariant(slot.variant) ? uid : null;
 }
 
 function quarantine(user, key, value, reason) {
@@ -320,7 +345,7 @@ export function normalizeCustomPokemon(user) {
           : !c || typeof c !== "object" || Array.isArray(c) ? "record was not an object"
           : c.uid !== key ? "uid does not match its key"
           : !Number.isInteger(c.speciesId) || !getSpeciesEntry(c.speciesId) ? "unknown species"
-          : !VARIANTS.has(c.variant) ? "bad variant"
+          : !VARIANT_KEYS.includes(c.variant) ? "bad variant"
           : !Array.isArray(c.tmMoves) || c.tmMoves.some((m) => typeof m !== "string" || m.length > 40) ? "bad tmMoves"
           : null;
         if (why) {
@@ -441,7 +466,7 @@ export function assignLineSlotsToCopy(user, id, variant, uid) {
  */
 export function carryCopyUids(user, previous, next, raw = []) {
   // Per line, the copies that line's slots held before (in slot order).
-  const lineKey = (s) => `${Number(s.id)}:${s.variant === "shiny" ? "shiny" : "normal"}`;
+  const lineKey = (s) => `${Number(s.id)}:${normalizeVariant(s.variant)}`;
   const prevUids = new Map();
   for (const s of Array.isArray(previous) ? previous : []) {
     const uid = s && typeof s === "object" ? slotBoxUid(user, s) ?? slotCopyUid(user, s) : null;
@@ -450,7 +475,7 @@ export function carryCopyUids(user, previous, next, raw = []) {
   const rawByKey = new Map();
   for (const r of Array.isArray(raw) ? raw : []) {
     if (!r || typeof r !== "object" || Array.isArray(r)) continue;
-    const key = `${Number(r.id)}:${r.variant === "shiny" || (r.variant == null && (r.shiny === true || r.isShiny === true)) ? "shiny" : "normal"}`;
+    const key = `${Number(r.id)}:${r.variant == null && (r.shiny === true || r.isShiny === true) ? "shiny" : normalizeVariant(r.variant)}`;
     (rawByKey.get(key) ?? rawByKey.set(key, []).get(key)).push(r);
   }
   const used = new Set();

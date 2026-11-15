@@ -27,11 +27,14 @@ import { getTraining } from "../utils/training.js";
 import { isTmEnabled } from "../config/tmFeatures.js";
 import { learnableMoves, chosenMoves, setMoveset, moveInfo, MAX_MOVES, TEAM_TYPES } from "./movesets.js";
 import { plainCount, customCopiesOf, slotCopyUid, slotBoxUid, createTrainedCopy, learnTmMove, assignLineSlotsToCopy } from "./ownership.js";
-import { copyTraining } from "./box.js";
+import { copyTraining, ownedCount } from "./box.js";
+import { normalizeVariant, isSpecialVariant } from "../utils/specialVariants.js";
 
 const TEAM_FIELD = { display: "displayedPokemon", battle: "battleTeam" };
 const fail = (status, error, code, extra = {}) => ({ ok: false, status, error, code, ...extra });
-const normV = (v) => (v === "shiny" ? "shiny" : "normal");
+const normV = normalizeVariant;
+// Owns the line: a Special variant is read from the box (the derived normal count also holds it).
+const owns = (user, id, v) => (isSpecialVariant(v) ? ownedCount(user, id, v) : Number(user?.pokemon?.[id]?.[v]) || 0) > 0;
 
 /**
  * The Level above `level` at which this species learns `move` by level-up,
@@ -78,7 +81,7 @@ export function teachOptions(user, { speciesId, variant }, { env = process.env }
   const v = normV(variant);
   if (!isTmEnabled(env)) return { ok: true, enabled: false };
   if (!Number.isInteger(id) || !getSpecies(id)) return fail(404, "Unknown Pokémon.", "bad_species");
-  if (!(Number(user?.pokemon?.[id]?.[v]) > 0)) return fail(400, "You don't own that Pokémon.", "unowned");
+  if (!owns(user, id, v)) return fail(400, "You don't own that Pokémon.", "unowned");
   const level = getTraining(user, id, v).level;
   const targets = [];
   const plain = plainCount(user, id, v);
@@ -119,7 +122,7 @@ export function teachTm(user, req = {}, { env = process.env, now = Date.now(), r
   const id = Number(req.pokeId);
   const v = normV(req.variant);
   if (!Number.isInteger(id) || !getSpecies(id)) return fail(400, "Unknown Pokémon.", "bad_species");
-  if (!(Number(user?.pokemon?.[id]?.[v]) > 0)) return fail(400, "You don't own that Pokémon.", "unowned");
+  if (!owns(user, id, v)) return fail(400, "You don't own that Pokémon.", "unowned");
 
   const move = moveIdForTmItem(req.item);
   const entry = move ? getCatalogItem(req.item) : null;

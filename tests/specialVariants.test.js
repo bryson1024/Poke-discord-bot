@@ -14,6 +14,29 @@ import {
   grantSpecial, ownedCount, isSpecialCopy, variantOf, copiesOf, spareCopies, canFeed, adoptCopy, normalizeBox, addCopy, DEX_NORMAL,
 } from "../services/box.js";
 import { expForLevel, levelForExp } from "../utils/training.js";
+import { canRemoveCopies, removeCopies, canTransformCopy, createTrainedCopy, normalizeCustomPokemon } from "../services/ownership.js";
+import { donateOne, bulkDonate } from "../utils/bulkDonate.js";
+import { giftPokemon } from "../commands/gift.js";
+import { teachOptions, teachTm } from "../services/tmTeaching.js";
+import { isOnTeam } from "../services/box.js";
+import { readFileSync } from "fs";
+
+const pokemonData = JSON.parse(readFileSync(new URL("../pokemonData.json", import.meta.url), "utf8"));
+const economy = {
+  ccByTier: { common: 250, uncommon: 500, rare: 1000, epic: 2500, legendary: 5000, mythic: 10000 },
+  shinyDustByTier: { common: 4, uncommon: 7, rare: 12, epic: 18, legendary: 22, mythic: 30 },
+  normalDustChanceByTier: { common: [{ chance: 1, dust: 1 }] },
+  normalDustWeeklyCap: 8,
+  rollDust: () => 0,
+};
+/** 2 plain Squirtle (Lv 5, Lv 30) and the Leader (Lv 25). */
+function squad() {
+  const u = { cc: 0 };
+  const p5 = plain(u, 5);
+  const p30 = plain(u, 30);
+  const leader = grantSpecial(u, "squad-leader").uid;
+  return { u, p5, p30, leader };
+}
 
 const LEADER_STATS = { hp: 66, atk: 72, def: 97, spa: 75, spd: 96, spe: 64 };
 const plain = (u, level) => addCopy(u, 7, "normal", { exp: expForLevel(level) }).uid;
@@ -120,6 +143,103 @@ section("box");
   let threw = false;
   try { adoptCopy(u, { rec: u.box[leader] }); } catch { threw = true; }
   assertTrue(threw, "adoptCopy refuses a Special record (a Gift never carries one)");
+}
+
+section("protections");
+{
+  const { u, leader } = squad();
+  const r = donateOne({ user: u, pokeId: 7, variant: "normal", pokemonData, economy, isOnTeam, uid: leader });
+  assertEqual(r.code ?? r.reason ?? r.error, "special", "donating the Leader by uid is refused as special");
+  assertTrue(!!u.box[leader], "the Leader is still owned");
+  assertEqual(canRemoveCopies(u, { id: 7, variant: "squad-leader", n: 1 }).code, "special", "removing the Special variant is refused");
+  const admin = removeCopies(u, { id: 7, variant: "squad-leader", n: 1, uids: [leader], allowTeam: true });
+  assertTrue(admin.ok && !u.box[leader], "admin tools can still remove the Leader");
+}
+{
+  const { u, p5, p30, leader } = squad();
+  const res = bulkDonate({ user: u, mode: "duplicates", items: [{ pokeId: 7, variant: "normal", count: 1 }], pokemonData, economy, isOnTeam });
+  assertTrue(!!u.box[leader], "bulk donate duplicates keeps the Leader");
+  assertTrue(!u.box[p5] && !!u.box[p30], "bulk donate duplicates takes the Lv 5 plain copy and keeps the best");
+  assertTrue(res.ok !== false, "bulk donate succeeded");
+}
+{
+  const { u, p30, leader } = squad();
+  const evolve = canTransformCopy(u, { from: { id: 7, variant: "normal" }, to: { id: 8, variant: "normal" } });
+  assertEqual(evolve.uid, p30, "evolving with no copy named takes the Lv 30 plain copy, never the Leader");
+  assertEqual(canTransformCopy(u, { from: { id: 7, variant: "normal" }, to: { id: 8, variant: "normal" }, uid: leader }).code, "special", "evolving the Leader by uid is refused");
+  assertEqual(canTransformCopy(u, { from: { id: 7, variant: "squad-leader" }, to: { id: 8, variant: "squad-leader" } }).code, "special", "evolving the Special variant is refused");
+  const shiny = canTransformCopy(u, { from: { id: 7, variant: "normal" }, to: { id: 7, variant: "shiny" } });
+  assertEqual(shiny.uid, p30, "making one shiny with no copy named takes a plain copy");
+  assertEqual(canTransformCopy(u, { from: { id: 7, variant: "normal" }, to: { id: 7, variant: "shiny" }, uid: leader }).code, "special", "making the Leader shiny is refused");
+}
+{
+  // Only the Leader owned, no copy named: say why, not "you don't own that Pokémon".
+  const u = { cc: 0 };
+  grantSpecial(u, "squad-leader");
+  const evolve = canTransformCopy(u, { from: { id: 7, variant: "normal" }, to: { id: 8, variant: "normal" } });
+  assertEqual([evolve.code, /kept for good/.test(evolve.error)], ["special", true], "evolving Squirtle with only the Leader says it's kept for good");
+  const shiny = canTransformCopy(u, { from: { id: 7, variant: "normal" }, to: { id: 7, variant: "shiny" } });
+  assertEqual(shiny.code, "special", "making Squirtle shiny with only the Leader says it's kept for good");
+  assertEqual(canTransformCopy(u, { from: { id: 4, variant: "normal" }, to: { id: 5, variant: "normal" } }).code, "not_owned", "an unowned species is still not_owned");
+}
+{
+  const sender = { cc: 0 };
+  grantSpecial(sender, "squad-leader");
+  const recipient = { cc: 0 };
+  const g = giftPokemon(sender, recipient, "7", "Squirtle", 1);
+  assertTrue(g?.ok === false || typeof g === "string", "gifting Squirtle with only the Leader owned is refused");
+  assertTrue(/Squirtle Squad Leader is kept for good/.test(g), "the refusal names the Leader, not the last-copy rule");
+  // With the Leader and a shiny, the derived normal count (1) covers the
+  // amount, so only the kept-for-good check can explain the refusal.
+  assertEqual(Object.keys(sender.box).length, 1, "the sender keeps the Leader");
+  addCopy(sender, 7, "shiny");
+  const g2 = giftPokemon(sender, recipient, "7", "Squirtle", 1);
+  assertTrue(/Squirtle Squad Leader is kept for good/.test(g2) && !/TM-trained/.test(g2), "with a shiny owned, the refusal still names the Leader");
+  assertEqual(Object.keys(sender.box).length, 2, "the sender keeps the Leader and the shiny");
+  const s2 = { cc: 0 };
+  plain(s2, 12);
+  grantSpecial(s2, "squad-leader");
+  const r2 = { cc: 0 };
+  giftPokemon(s2, r2, "7", "Squirtle", 1);
+  const got = Object.values(r2.box ?? {});
+  assertEqual(got.length, 1, "with a plain copy owned, one Squirtle is gifted");
+  assertEqual(got[0]?.variant, undefined, "the gifted copy is a plain Squirtle, not the Leader");
+  assertEqual(Object.values(s2.box).map((r) => r.variant), ["squad-leader"], "the sender keeps the Leader");
+}
+{
+  const { u, leader } = squad();
+  const t = createTrainedCopy(u, 7, "squad-leader", 1, leader);
+  assertTrue(t.ok && u.customPokemon[leader]?.variant === "squad-leader", "the Leader can become a TM-trained copy");
+  normalizeCustomPokemon(u);
+  assertEqual(u.customPokemon?.[leader]?.variant, "squad-leader", "normalizeCustomPokemon keeps a trained Leader record");
+  normalizeBox(u);
+  assertEqual(u.box[leader]?.variant, "squad-leader", "the trained Leader's box record keeps its Special variant");
+}
+{
+  // A player who owns only the Leader: its copy counts under normal, so a
+  // normal-or-shiny coercion would find no copy to teach.
+  const u = { cc: 0 };
+  const leader = grantSpecial(u, "squad-leader").uid;
+  const env = { TM_ENABLED: "1" };
+  const o = teachOptions(u, { speciesId: 7, variant: "squad-leader" }, { env });
+  assertEqual([o.ok, o.variant], [true, "squad-leader"], "TM options open for the Leader's own Variant");
+  assertEqual(o.targets.map((t) => t.count), [1], "the untrained Leader is the one copy to teach");
+  createTrainedCopy(u, 7, "squad-leader", 1, leader);
+  const o2 = teachOptions(u, { speciesId: 7, variant: "squad-leader" }, { env });
+  assertEqual(o2.targets.map((t) => t.uid), [leader], "once trained, the Leader is listed by its uid");
+  const n = teachOptions(u, { speciesId: 7, variant: "normal" }, { env });
+  assertEqual(n.targets?.length ?? 0, 0, "plain Squirtle options never list the Leader");
+}
+{
+  // A real TM teach to the Leader by uid (Ice Beam: TM-compatible, not one of its extra moves).
+  const u = { cc: 0, items: { tm_icebeam: 1 } };
+  const leader = grantSpecial(u, "squad-leader").uid;
+  const r = teachTm(u, { item: "tm_icebeam", pokeId: 7, variant: "squad-leader", uid: leader, expect: {}, equip: {} }, { env: { TM_ENABLED: "1" } });
+  assertTrue(r.ok && r.uid === leader, "a TM is taught to the Leader named by uid");
+  assertEqual([u.customPokemon?.[leader]?.variant, u.customPokemon?.[leader]?.tmMoves, u.items.tm_icebeam], ["squad-leader", ["icebeam"], 0], "the trained Leader keeps its Special variant; the TM is spent");
+  normalizeCustomPokemon(u);
+  normalizeBox(u);
+  assertEqual([u.customPokemon?.[leader]?.variant, u.box[leader]?.variant], ["squad-leader", "squad-leader"], "normalizing keeps the trained Leader as the Leader");
 }
 
 finish();

@@ -70,7 +70,8 @@ export function bulkDonate({ user, mode, items, pokemonData, economy, isOnTeam }
     if (seen.has(key)) return { error: `${p.name} is listed twice.` };
     seen.add(key);
 
-    const owned = user.pokemon?.[pid]?.[variant] ?? 0;
+    // Copies of exactly this line (the derived normal count also holds Special copies, which are never donated).
+    const owned = copiesOf(user, pid, variant).length;
     const plain = plainCount(user, pid, variant);
     const trained = customCopiesOf(user, pid, variant).length;
     const label = variant === "shiny" ? `shiny ${p.name}` : p.name;
@@ -104,7 +105,7 @@ export function bulkDonate({ user, mode, items, pokemonData, economy, isOnTeam }
       if (count !== 1) return { error: "Multi-select donates one copy of each Pokémon." };
       if (owned < 1) return { error: `You no longer have a ${label}.` };
 
-      const total = (user.pokemon[pid].normal ?? 0) + (user.pokemon[pid].shiny ?? 0);
+      const total = copiesOf(user, pid, "normal").length + copiesOf(user, pid, "shiny").length;
       if (total > 1) return { error: `You have more than one ${p.name} now.` };
       if (plain < 1) return { error: `Your ${label} has TM-trained moves. Donate it on its own to confirm.` };
       if (isOnTeam(pid, variant)) {

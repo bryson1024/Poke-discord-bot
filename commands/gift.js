@@ -20,6 +20,7 @@ import { saveAndAck, withSaveNote } from "../utils/saveManager.js";
 import { ensureUserInitialized } from "../utils/userInitializer.js";
 import { plainCount, removeCopies } from "../services/ownership.js";
 import { adoptCopy } from "../services/box.js";
+import { isSpecialVariant, specialVariant } from "../utils/specialVariants.js";
 import { lockUsers } from "../utils/userLocks.js";
 import { ownsTrainer, grantTrainer, revokeTrainer, trainerCount } from "../services/assets.js";
 import { trackProgress } from "../progression/achievements.js";
@@ -35,6 +36,9 @@ export function giftPokemon(sender, recipient, key, name, amount) {
   // Only normals move, so only normals can cover the amount. Counting shinies
   // here let 1 normal + 3 shiny send 3 normals, creating 2 from nothing.
   if (normal < amount) return `❌ You don't have ${amount}× normal ${name} to gift. Shiny Pokémon can't be gifted.`;
+  // A Special copy (the Squirtle Squad Leader) counts as normal but never leaves its owner.
+  const kept = Object.values(sender.box ?? {}).filter((r) => String(r?.id) === String(key) && isSpecialVariant(r?.variant));
+  if (kept.length && normal - kept.length < amount) return `❌ You don't have ${amount}× ${name} to gift: the ${specialVariant(kept[0].variant).name} is kept for good.`;
   if (normal + shiny - amount === 0) return `⚠️ You can't gift your last ${name}.`;
   if (plainCount(sender, key, "normal") < amount) return `❌ Some of your ${name} have TM-trained moves, and TM-trained Pokémon can't be gifted.`;
 
