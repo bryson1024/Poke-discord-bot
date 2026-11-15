@@ -22,7 +22,9 @@ import { toTeamObj } from "../utils/economyRules.js";
 import { learnableMoves, chosenMoves, moveInfo as movesetMoveInfo } from "./movesets.js";
 import { customCopiesOf, plainCount } from "./ownership.js";
 import { isTmEnabled } from "../config/tmFeatures.js";
-import { copiesOf } from "./box.js";
+import { copiesOf, ownedCount } from "./box.js";
+import { VARIANT_KEYS, isSpecialVariant, specialBattleProfile } from "../utils/specialVariants.js";
+import { pokemonSpritePath } from "../utils/sprites.js";
 
 const sum = (s) => (s ? s.hp + s.atk + s.def + s.spa + s.spd + s.spe : null);
 const nameOf = (id) => displaySpeciesName(id, getSpeciesEntry(id)?.name);
@@ -74,20 +76,30 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
   const id = Number(speciesId);
   const entry = Number.isInteger(id) ? getSpeciesEntry(id) : null;
   if (!entry) return { status: 404, body: { error: "Unknown Pokémon." } };
-  const counts = { normal: Number(user?.pokemon?.[id]?.normal) || 0, shiny: Number(user?.pokemon?.[id]?.shiny) || 0 };
-  if (!isGenerationLive(entry.generation) && counts.normal + counts.shiny === 0) return { status: 404, body: { error: "Unknown Pokémon." } };
+  // A Special copy (the Squirtle Squad Leader) is its own entry; its derived count sits under normal.
+  const specials = VARIANT_KEYS.filter((v) => isSpecialVariant(v) && ownedCount(user, id, v) > 0);
+  const specialCount = specials.reduce((n, v) => n + ownedCount(user, id, v), 0);
+  const counts = {
+    normal: Math.max(0, (Number(user?.pokemon?.[id]?.normal) || 0) - specialCount),
+    shiny: Number(user?.pokemon?.[id]?.shiny) || 0,
+    ...Object.fromEntries(specials.map((v) => [v, ownedCount(user, id, v)])),
+  };
+  if (!isGenerationLive(entry.generation) && counts.normal + counts.shiny + specialCount === 0) return { status: 404, body: { error: "Unknown Pokémon." } };
   const species = getSpecies(id);
 
   // Each owned copy: real Level, EXP progress, stats and moves there (the
   // same slotView as /showteam and /inspectpokemon), plus its Lv 50
   // (ranked) stats, team slots and the next moves it will learn.
   const copies = {};
-  for (const variant of ["normal", "shiny"]) {
+  for (const variant of ["normal", "shiny", ...specials]) {
     if (!counts[variant]) continue;
     const level = getTraining(user, id, variant).level;
     const v = slotView(user, { speciesId: id, variant, level }, 0);
-    const stats50 = species?.baseStats ? computeStats(species.baseStats, RANKED.level) : null;
+    const special = specialBattleProfile(variant);
+    const base = special?.baseStats ?? species?.baseStats;
+    const stats50 = base ? computeStats(base, RANKED.level) : null;
     copies[variant] = {
+      ...(special && { name: special.name, sprite: pokemonSpritePath(id, variant) }),
       count: counts[variant],
       level,
       expFrac: v.expFrac,

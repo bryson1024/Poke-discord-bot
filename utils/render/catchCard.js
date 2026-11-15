@@ -20,6 +20,7 @@ import { rr, font, fitFont, drawTypeChips, drawShinyMark, drawLevel, dexNo, fill
 import { loadStaticSprite, loadPlaceholder } from "./sprites.js";
 import { spriteStage } from "./stage.js";
 import { displaySpeciesName } from "./names.js";
+import { specialVariant } from "../specialVariants.js";
 import { getSpecies, TYPE_ID_TO_NAME } from "../battle/data.js";
 import { ALL_REGIONS } from "../../catalog/achievements.js";
 
@@ -47,7 +48,7 @@ function speciesFacts(id, variant) {
     id: Number(id),
     variant,
     shiny: variant === "shiny",
-    name: displaySpeciesName(id, entry.name),
+    name: specialVariant(variant)?.name ?? displaySpeciesName(id, entry.name),
     types: getSpecies(id)?.types ?? (entry.types ?? []).map((t) => TYPE_ID_TO_NAME[t]).filter(Boolean),
     tier: String(entry.tier ?? "common").toLowerCase(),
     region: entry.region ?? null,
@@ -73,8 +74,8 @@ export function catchView(user, { id, variant, catchResult, trainerName }) {
 }
 
 /** A broadcast without a catch result: no Level, NEW/EXP or Pokédex line. */
-export function sightingView({ id, shiny = false }) {
-  return { ...speciesFacts(id, shiny ? "shiny" : "normal"), level: null, isNew: null, expGained: 0, copies: null, dex: null, sighting: true };
+export function sightingView({ id, shiny = false, variant = shiny ? "shiny" : "normal" }) {
+  return { ...speciesFacts(id, variant), level: null, isNew: null, expGained: 0, copies: null, dex: null, sighting: true };
 }
 
 function drawPill(ctx, text, right, y, color, { h = 18, size = 10 } = {}) {

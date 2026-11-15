@@ -19,7 +19,7 @@ import { donateOne, bulkDonate } from "../utils/bulkDonate.js";
 import { giftPokemon } from "../commands/gift.js";
 import { teachOptions, teachTm } from "../services/tmTeaching.js";
 import { isOnTeam } from "../services/box.js";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { normalizeTeam } from "../utils/teamNormalize.js";
 import { prepareTeamSelection, normalizeDisplayedTeam } from "../services/megaTeam.js";
 import * as battleTeam from "../services/battleTeam.js";
@@ -34,6 +34,13 @@ import * as battleRender from "../utils/battle/render.js";
 import { runChallenge } from "../utils/challenge/runChallenge.js";
 import { createNewUser } from "../utils/userSchema.js";
 import { expMembers } from "../utils/render/expCard.js";
+import { GifReader } from "omggif";
+import { spriteFileFor, loadStaticSprite } from "../utils/render/sprites.js";
+import { pokemonSpritePath } from "../utils/sprites.js";
+import { flattenTrainerSprites } from "../utils/dataLoader.js";
+import { slotView, buildShowcaseView } from "../utils/render/teamView.js";
+import { pokemonDetail } from "../services/pokemonDetail.js";
+import { sightingView } from "../utils/render/catchCard.js";
 
 const pokemonData = JSON.parse(readFileSync(new URL("../pokemonData.json", import.meta.url), "utf8"));
 const economy = {
@@ -376,6 +383,51 @@ section("battle");
   const { u } = squad();
   const [row] = expMembers([{ key: "7:squad-leader", name: "Squirtle Squad Leader", fromLevel: 25, toLevel: 26, gained: 100 }], u);
   assertEqual([row.name, row.variant, row.shiny, typeof row.expFrac], ["Squirtle Squad Leader", "squad-leader", false, "number"], "the EXP card shows the Leader by name with its own EXP bar");
+}
+
+section("sprites");
+{
+  const P = (rel) => new URL(`../${rel}`, import.meta.url);
+  const gifs = ["normal", "grayscale"].flatMap((f) => ["squad-leader", "squad-member"].map((k) => `public/sprites/pokemon/special/${f}/${k}.gif`));
+  const files = [...gifs, "public/sprites/trainers_2/squirtlesquadleader.png"];
+  assertEqual(files.filter((f) => !existsSync(P(f))), [], "the Special sprites and the Squad's trainer sprite are installed");
+  for (const f of gifs.filter((g) => existsSync(P(g)))) {
+    const r = new GifReader(readFileSync(P(f)));
+    const frames = [...Array(r.numFrames()).keys()];
+    assertTrue(frames.length > 1 && frames.every((i) => r.frameInfo(i).disposal !== 3), `${f} is animated and uses no GIF disposal 3`);
+    if (f.includes("/grayscale/")) {
+      const px = new Uint8Array(r.width * r.height * 4);
+      r.decodeAndBlitFrameRGBA(0, px);
+      let gray = true;
+      for (let i = 0; i < px.length; i += 4) if (px[i + 3] && (px[i] !== px[i + 1] || px[i + 1] !== px[i + 2])) { gray = false; break; }
+      assertTrue(gray, `${f} is grayscale`);
+    }
+  }
+  assertTrue(spriteFileFor(7, "squad-leader")?.endsWith("special/normal/squad-leader.gif"), "spriteFileFor finds the Leader's sprite");
+  assertEqual(pokemonSpritePath(7, "squad-leader"), "/public/sprites/pokemon/special/normal/squad-leader.gif", "pokemonSpritePath finds the Leader's sprite");
+  assertTrue((await loadStaticSprite(7, "squad-leader")) != null, "loadStaticSprite loads the Leader's sprite, not the placeholder");
+  const catalog = JSON.parse(readFileSync(P("trainerSprites.json"), "utf8"));
+  assertTrue(!JSON.stringify(catalog).toLowerCase().includes("squirtlesquadleader"), "the Squad's trainer sprite is not in trainerSprites.json");
+  assertTrue(!JSON.stringify(flattenTrainerSprites(catalog)).toLowerCase().includes("squirtlesquadleader"), "nor among the trainer sprites anyone can own");
+}
+{
+  const { u, p5, p30, leader } = squad();
+  const v = slotView(u, { speciesId: 7, variant: "squad-leader", level: 25, copyUid: leader }, 0);
+  assertEqual([v.name, v.variant, v.stats], ["Squirtle Squad Leader", "squad-leader", computeStats(LEADER_STATS, 25)], "slotView names the Leader and shows its stats");
+  u.showcaseTeam = [{ id: 7, variant: "squad-leader", uid: leader }];
+  assertEqual(buildShowcaseView(u).slots.map((s) => [s.name, s.variant]), [["Squirtle Squad Leader", "squad-leader"]], "the Showcase image shows the Leader");
+
+  const { body } = pokemonDetail(u, 7);
+  assertEqual([body.owned.normal, body.owned["squad-leader"]], [2, 1], "the detail counts the Leader apart from plain Squirtle");
+  const L = body.copies["squad-leader"];
+  assertEqual([L?.count, L?.name, L?.sprite, L?.level, L?.stats], [1, "Squirtle Squad Leader", "/public/sprites/pokemon/special/normal/squad-leader.gif", 25, computeStats(LEADER_STATS, 25)], "the Leader is its own entry with its name, sprite and stats at its Level");
+  assertEqual(L?.stats50, computeStats(LEADER_STATS, 50), "the Leader's Lv 50 stats use its own base stats");
+  assertEqual([body.copies.normal.count, body.copies.normal.each.map((c) => c.uid).sort()], [2, [p5, p30].sort()], "plain Squirtle's entry lists only plain copies");
+  assertTrue(L?.learnable?.some((m) => m.id === "surf" && m.source === "special"), "the Leader's entry lists its own moves");
+}
+{
+  const s = sightingView({ id: 7, variant: "squad-leader" });
+  assertEqual([s.name, s.variant, s.shiny], ["Squirtle Squad Leader", "squad-leader", false], "a broadcast sighting card shows the Leader");
 }
 
 finish();

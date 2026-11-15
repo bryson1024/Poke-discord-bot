@@ -10,6 +10,7 @@
 
 import fs from "fs";
 import { publicBaseUrl } from "./publicUrl.js";
+import { isSpriteVariant, specialSpriteFile } from "./specialVariants.js";
 
 const MANIFEST = JSON.parse(fs.readFileSync(new URL("../data/sprites/sprites.json", import.meta.url), "utf8")).species;
 export const PLACEHOLDER_PATH = "/public/sprites/items/pokeball.png";
@@ -21,6 +22,8 @@ export const spriteRecord = (id) => MANIFEST[Number(id)] ?? null;
 /** "normal" | "shiny" | "grayscale" → "/public/sprites/pokemon/<file>", or the placeholder. */
 export function pokemonSpritePath(id, variant = "normal") {
   const v = variant === true ? "shiny" : variant === false ? "normal" : variant;
+  // A Special variant (the Squirtle Squad Leader) has its own file, outside the species manifest.
+  if (isSpriteVariant(v)) return `/public/sprites/pokemon/${specialSpriteFile(v, "normal")}`;
   const rec = spriteRecord(id)?.[v];
   if (rec?.file) return `/public/sprites/pokemon/${rec.file}`;
   const key = `${id}:${v}`;

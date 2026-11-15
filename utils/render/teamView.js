@@ -25,6 +25,7 @@ import { megaShortName, teamMegaStatus } from "../megaDisplay.js";
 import { copyTraining } from "../../services/box.js";
 import { megaFormGate, megaBattleProfile } from "../megas.js";
 import { isMegaCapabilityEnabled } from "../../config/features.js";
+import { normalizeVariant, specialBattleProfile } from "../specialVariants.js";
 
 const POKEMON = JSON.parse(fs.readFileSync(new URL("../../pokemonData.json", import.meta.url), "utf8"));
 
@@ -46,10 +47,12 @@ export function slotView(user, member, index) {
   const entry = POKEMON[id] ?? {};
   const species = getSpecies(id);
   const profile = member.megaForm ? member.battleProfile : null;
-  const types = profile ? [...profile.types] : species?.types ?? (entry.types ?? []).map((t) => TYPE_ID_TO_NAME[t]).filter(Boolean);
+  // A Special variant (the Squirtle Squad Leader): its catalog name and base stats, as in battle.
+  const special = profile ? null : specialBattleProfile(variant);
+  const types = profile ? [...profile.types] : special ? [...special.types] : species?.types ?? (entry.types ?? []).map((t) => TYPE_ID_TO_NAME[t]).filter(Boolean);
   // The slot's own copy (docs/adr/0001); the line's best copy for older callers.
   const { exp } = (member.copyUid && copyTraining(user, member.copyUid)) || getTraining(user, id, variant);
-  const statBase = profile?.baseStats ?? species?.baseStats;
+  const statBase = profile?.baseStats ?? special?.baseStats ?? species?.baseStats;
   const stats = statBase ? computeStats(statBase, level) : null;
   const baseName = displaySpeciesName(id, entry.name ?? member.baseName ?? member.name);
   return {
@@ -57,7 +60,7 @@ export function slotView(user, member, index) {
     id,
     spriteId: profile ? member.megaForm : id,
     mega: profile ? { formId: member.megaForm, name: profile.name, shortName: megaShortName(member.megaForm), baseName } : null,
-    name: profile ? profile.name : baseName,
+    name: profile ? profile.name : special?.name ?? baseName,
     variant,
     shiny: variant === "shiny",
     level,
@@ -125,7 +128,7 @@ export function buildShowcaseView(user, { displayName = "Trainer", trainerFile =
   const members = (Array.isArray(user?.showcaseTeam) ? user.showcaseTeam : []).flatMap((s) => {
     const t = s.uid ? copyTraining(user, s.uid) : null;
     if (!t) return [];
-    const member = { speciesId: Number(s.id), variant: s.variant === "shiny" ? "shiny" : "normal", level: t.level, copyUid: s.uid };
+    const member = { speciesId: Number(s.id), variant: normalizeVariant(s.variant), level: t.level, copyUid: s.uid };
     if (s.mega && megaOn && megaFormGate(s.mega, "team", { env }).allowed) {
       const profile = megaBattleProfile(s.mega);
       if (profile) Object.assign(member, { megaForm: s.mega, battleProfile: profile });

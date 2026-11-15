@@ -13,6 +13,7 @@ import { sightingView } from "./render/catchCard.js";
 import { renderCatchImage, broadcastCaption } from "./render/catchMessage.js";
 import { spritePaths, rarityEmojis } from "../spriteconfig.js";
 import { trainerImageUrl } from "./trainerAssets.js";
+import { isSpecialVariant } from "./specialVariants.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -99,7 +100,8 @@ export async function broadcastReward(
     if (type === "pokemon") {
       // 🟢 Pokémon
       displayName = shiny ? `✨ Shiny ${item.name}` : item.name;
-      spriteUrl = pokemonSpriteUrl(item.id, shiny);
+      // A Special variant (item.variant, the Squirtle Squad Leader) shows its own sprite.
+      spriteUrl = pokemonSpriteUrl(item.id, isSpecialVariant(item.variant) ? item.variant : shiny);
     } else {
       // 🔵 Trainer
       const base = spritePaths.trainers.endsWith("/")
@@ -201,7 +203,7 @@ const embed = new EmbedBuilder()
     let card = image, line = caption;
     if (!card?.buffer && type === "pokemon") {
       try {
-        const view = sightingView({ id: item.id, shiny });
+        const view = sightingView({ id: item.id, shiny, ...(isSpecialVariant(item.variant) && { variant: item.variant }) });
         card = await renderCatchImage(view);
         line = broadcastCaption(view, nameSafe);
       } catch (err) {

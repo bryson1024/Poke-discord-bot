@@ -17,6 +17,7 @@ import { createCanvas, ImageData, loadImage } from "@napi-rs/canvas";
 import { GifReader } from "omggif";
 import { spriteRecord } from "../sprites.js";
 import { isMegaId, megaSpriteRecord } from "../megas.js";
+import { isSpriteVariant, specialSpriteFile } from "../specialVariants.js";
 import { stepCount } from "../trainerIdle.js";
 import { motionStates, poseOf, cardSchedule } from "../trainerMotion.js";
 import { trainerIdle, trainersAnimated, trainerParts } from "../trainerAssets.js";
@@ -82,6 +83,8 @@ async function decodeFirstFrame(file) {
  * placeholder instead).
  */
 export function spriteFileFor(id, variant = "normal") {
+  // A Special variant (the Squirtle Squad Leader) has its own file, outside the species manifest.
+  if (isSpriteVariant(variant)) return `sprites/pokemon/${specialSpriteFile(variant, "normal")}`;
   if (isMegaId(id)) {
     const rec = megaSpriteRecord(id)?.[variant];
     return rec?.file ? `sprites/pokemon/mega/${rec.file}` : null;
