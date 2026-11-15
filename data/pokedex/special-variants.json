@@ -1,0 +1,18 @@
+{
+  "note": "Hand-written, never regenerated (docs/superpowers/specs/2026-11-14-squirtle-squad-design.md). A Special variant is a one-of-a-kind Variant of a species a player wins (ownable: true). An entry with ownable: false is a look a computer-run Trainer's Pokémon can wear: sprites only, never owned. baseStats replace the species' in battle; extraMoves are learnable from Lv 1; startLevel is the Level a won copy starts at. Sprites: public/sprites/pokemon/special/{normal,grayscale}/<key>.gif.",
+  "variants": {
+    "squad-leader": {
+      "species": 7,
+      "name": "Squirtle Squad Leader",
+      "ownable": true,
+      "baseStats": { "hp": 66, "atk": 72, "def": 97, "spa": 75, "spd": 96, "spe": 64 },
+      "extraMoves": ["aquajet", "surf"],
+      "startLevel": 25
+    },
+    "squad-member": {
+      "species": 7,
+      "name": "Squirtle",
+      "ownable": false
+    }
+  }
+}
