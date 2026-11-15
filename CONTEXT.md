@@ -23,8 +23,12 @@ A species' position in its evolution line — 1 for a base form, 2 and 3 for eac
 _Avoid_: evolution tier, evolution level, form
 
 **Variant**:
-Whether a Pokémon is normal or shiny. The **Pokédex** records each species + **Variant** pair separately.
+Which version of its species a Pokémon is: normal, shiny, or a **Special variant**. The **Pokédex** records normal and shiny separately for each species.
 _Avoid_: form, version, shiny status
+
+**Special variant**:
+A one-of-a-kind **Variant** of a species that a player wins rather than catches, such as Squirtle Squad Leader, with its own look and its own battle strength. A player holds at most one of each, and getting one registers its species in the **Pokédex** the same way a normal copy does. It is kept for good: it can't be donated, fed, gifted, evolved or crafted shiny, and it can join the **Showcase team** and **Casual team** but not the **Ranked team**.
+_Avoid_: special Pokémon, event Pokémon, form, unique Pokémon
 
 **Copy**:
 One individual Pokémon a player owns: a species in a specific **Variant**, with its own **Level**, **EXP** and moves. Two copies of the same species are two different Pokémon.
@@ -89,7 +93,7 @@ The **Team** that fights **Casual battles** at its real Levels.
 _Avoid_: Display team (its old name), open team
 
 **Ranked team**:
-The **Team** that fights **Ranked battles** and **Wager battles**, where every Pokémon fights at Lv 50. It holds at most one mythic-tier Pokémon.
+The **Team** that fights **Ranked battles** and **Wager battles**, where every Pokémon fights at Lv 50. It holds at most one mythic-tier Pokémon and no **Special variants**.
 _Avoid_: Battle team (its old name)
 
 **Tier backdrop**:
@@ -247,7 +251,7 @@ _Avoid_: heal, Max Revive (as a term), second wind
 ### Trainer encounters
 
 **Trainer encounter**:
-A computer-run Trainer spotting a player while they chat and asking for a fight the player may accept with their **Casual team** or **Ranked team**, at real **Levels**, or decline. The Trainer's Levels are set by the team the player picks. It is neither a **Battle** nor a **Challenge**: no other player takes part, and the Trainer is not one of the fixed Kanto teams.
+A computer-run Trainer spotting a player while they chat and asking for a fight the player may accept with their **Casual team** or **Ranked team**, at real **Levels**, or decline. The Trainer's Levels are set by the team the player picks, except for the **Squirtle Squad**. It is neither a **Battle** nor a **Challenge**: no other player takes part, and the Trainer is not one of the fixed Kanto teams.
 _Avoid_: trainer battle, random battle, wild trainer, NPC battle
 
 **Trainer class**:
@@ -255,12 +259,16 @@ The kind of Trainer met in a **Trainer encounter**, such as Youngster, Lass, or 
 _Avoid_: trainer type, NPC type
 
 **Ace Trainer**:
-The **Trainer class** that only the strongest **Trainer encounters** use. Those encounters can also come as any other class, so a Trainer's class never proves they are weak.
+The **Trainer class** that only the strongest **Trainer encounters** use, apart from the **Squirtle Squad**. Those encounters can also come as any other class, so a Trainer's class never proves they are weak.
 _Avoid_: elite trainer, boss trainer
 
 **Prize money**:
-The CC at stake in a **Trainer encounter**, set by the **Trainer class** and the Level of the Trainer's last Pokémon. The Trainer pays it to a player who wins, and a player who loses pays the same amount, or all their CC if they hold less.
+The CC at stake in a **Trainer encounter**, set by the **Trainer class** and the Level of the Trainer's last Pokémon. The Trainer pays it to a player who wins, and a player who loses pays the same amount, or all their CC if they hold less. The **Squirtle Squad** has none.
 _Avoid_: reward, bounty, payout (as a noun)
+
+**Squirtle Squad**:
+The rarest **Trainer encounter**, 1 in every 100: a fixed team led off by the Lv 100 Squirtle Squad Leader, followed by five Lv 25 Squirtle Squad members. The Leader fights powered up, stronger than the **Special variant** a player wins. A win gives the player the Squirtle Squad Leader **Special variant** if they don't already have one, and otherwise nothing. Losing or running costs nothing.
+_Avoid_: squad raid, boss encounter, squad battle
 
 ### Battle Records
 
