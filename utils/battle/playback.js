@@ -27,6 +27,7 @@ import { threaded } from "../render/renderers.js";
 import { trainerTier, cardTrainerFx } from "../render/trainerTier.js";
 import { battleVsAltText } from "../render/battleVsCard.js";
 import { isGif } from "../render/stage.js";
+import { SQUAD_TEXT } from "../encounter/squad.js";
 
 // The /battle VS card's minimum time on screen, before playback edits it
 // into turn 1. A GIF stays up a whole number of its loops (its length is
@@ -454,10 +455,14 @@ export const encounterNames = (outcome, playerName) => ({
 // win. Never the amount on a loss: a player who held less than the Prize
 // money paid all they had, which would reveal it. It's the embed under the
 // final image, then all the card keeps once the images go.
+// The Squirtle Squad plays for no CC: a win says whether the Leader joined.
 export function encounterSummary(outcome, names) {
   const player = names[outcome.userId];
   const said = outcome.won ? outcome.trainer.lines.lost : outcome.trainer.lines.won;
-  const result = outcome.won ? `💰 ${player} got ${outcome.prize.toLocaleString("en-US")} CC for winning!` : `${player} whited out!`;
+  const won = outcome.trainer.squad
+    ? (outcome.special?.granted ? SQUAD_TEXT.joined : SQUAD_TEXT.salutes)
+    : `💰 ${player} got ${outcome.prize.toLocaleString("en-US")} CC for winning!`;
+  const result = outcome.won ? won : `${player} whited out!`;
   return [`💬 ${names.trainer}: "${said}"`, result].join("\n");
 }
 

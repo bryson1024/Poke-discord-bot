@@ -26,6 +26,7 @@ import { trainerTier, cardTrainerFx } from "./trainerTier.js";
 import { backdropTint, hasBackdrop } from "./trainerBackdrop.js";
 import { trainerLight } from "./auraArt.js";
 import { placeTrainer, occupancy, halfBackdrop } from "./vsField.js";
+import { SQUAD_TEXT } from "../encounter/squad.js";
 
 export const ENCOUNTER_CARD_SIZE = Object.freeze({ w: 1200, h: 600 });
 const { w: W, h: H } = ENCOUNTER_CARD_SIZE;
@@ -40,7 +41,10 @@ const n = (x) => x.toLocaleString("en-US");
 // prizes: [{ label: "Casual" | "Ranked", prize }] when the player can pick
 // either team (three-teams split); the Trainer's Levels, and so the prize,
 // follow the team picked. Null or one entry: the single prize as before.
+// The Squirtle Squad (trainer.squad) has its own heading, and its prize is
+// a secret: `stakes` shows "???" where other Trainers show CC.
 export function encounterCardView({ trainer, team, user, displayName, prizes = null }) {
+  const squad = trainer.squad === true;
   return {
     player: {
       name: displayName,
@@ -49,15 +53,16 @@ export function encounterCardView({ trainer, team, user, displayName, prizes = n
       team: team.map((m) => ({ id: m.speciesId, variant: m.variant, shiny: m.variant === "shiny" })),
     },
     trainer: { title: trainer.title, name: trainer.name, trainerFile: trainer.spriteFile, partySize: trainer.party.length },
-    heading: `${trainer.title} ${trainer.name} challenged ${displayName}!`,
+    heading: squad ? SQUAD_TEXT.heading : `${trainer.title} ${trainer.name} challenged ${displayName}!`,
     line: trainer.lines.intro,
     prize: trainer.prize,
-    prizes: Array.isArray(prizes) && prizes.length > 1 ? prizes : null,
+    prizes: !squad && Array.isArray(prizes) && prizes.length > 1 ? prizes : null,
+    stakes: squad ? SQUAD_TEXT.prize : null,
   };
 }
 
 /** The image's description (Discord's alt text). */
-export const encounterAltText = (v) => `${v.heading} "${v.line}" ` + (v.prizes
+export const encounterAltText = (v) => `${v.heading} "${v.line}" ` + (v.stakes ? `Prize: ${v.stakes}.` : v.prizes
   ? `Prize: ${v.prizes.map((p) => `${n(p.prize)} CC with the ${p.label} team`).join(", ")}.`
   : `Win or lose: ${n(v.prize)} CC.`);
 
@@ -128,6 +133,13 @@ function drawStakes(ctx, v, { x, y, w, h }) {
   ctx.textBaseline = "alphabetic";
   ctx.font = font(18, 800);
   ctx.fillStyle = COLOR.textMuted;
+  if (v.stakes) {
+    ctx.fillText("PRIZE", x + w / 2, y + 44);
+    ctx.font = font(36, 900);
+    ctx.fillStyle = COLOR.gold;
+    ctx.fillText(v.stakes, x + w / 2, y + 94);
+    return;
+  }
   if (v.prizes) {
     // One row per team: the label, then that team's prize.
     ctx.fillText("PRIZE · WIN OR LOSE", x + w / 2, y + 34);

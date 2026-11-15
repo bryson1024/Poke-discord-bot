@@ -205,7 +205,7 @@ const embed = new EmbedBuilder()
       try {
         const view = sightingView({ id: item.id, shiny, ...(isSpecialVariant(item.variant) && { variant: item.variant }) });
         card = await renderCatchImage(view);
-        line = broadcastCaption(view, nameSafe);
+        line = caption ?? broadcastCaption(view, nameSafe); // a caller's own line (the Squirtle Squad's) stands
       } catch (err) {
         console.warn("⚠️ sighting card failed; broadcasting the embed:", err?.message || err);
       }

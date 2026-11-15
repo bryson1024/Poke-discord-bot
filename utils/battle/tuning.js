@@ -105,4 +105,17 @@ export const ENCOUNTER = {
   partySize: [3, 6],
   aceShare: 0.5,
   surprise: { share: 0.03, band: [10, 25] },
+  // The Squirtle Squad (utils/encounter/squad.js): the part of encounters, by the card's seed.
+  squadShare: 0.01,
+};
+
+// The Squirtle Squad's fixed party (docs/superpowers/specs/2026-11-14-squirtle-squad-design.md).
+// statMult: a fight-only boost on the Leader's stats, set so near-max (Lv 90+)
+// teams win about half the time (tools/squad-winrate.mjs).
+export const SQUAD = {
+  leaderLevel: 100,
+  memberLevel: 25,
+  members: 5,
+  statMult: 1.7,
+  leaderMoves: ["surf", "hydropump", "aquatail", "bite"],
 };

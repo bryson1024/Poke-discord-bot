@@ -471,6 +471,7 @@ ensureWeeklyReset(user);
 import { lockUser } from "./utils/userLocks.js";
 import { createMessageHandler, createRoleFlush } from "./utils/passiveChat.js";
 import { createEncounterService, isEncounterButton } from "./utils/encounter/service.js";
+import { squadBroadcast } from "./utils/encounter/squad.js";
 import { grantCatch, levelsForUser } from "./utils/training.js";
 import { refundAllPending } from "./utils/battle/wager.js";
 import { closeAllRematches } from "./utils/battle/rematch.js";
@@ -1231,7 +1232,11 @@ async function tryGiveRandomReward(userObj, interactionUser, msgOrInteraction) {
 
 // Trainer encounters (utils/encounter/service.js): open encounters live in
 // memory; their buttons come through interactionCreate below.
-const encounters = createEncounterService({ getTrainerData: () => trainerData, lockUser, enqueueSave });
+// A Squirtle Squad win that grants the Leader is posted like a rare catch.
+const encounters = createEncounterService({
+  getTrainerData: () => trainerData, lockUser, enqueueSave,
+  announce: (a) => broadcastReward(client, squadBroadcast(a)),
+});
 
 
 // ==========================================================

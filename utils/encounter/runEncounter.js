@@ -16,6 +16,8 @@ import { trackProgress } from "../../progression/achievements.js";
 import { ENCOUNTER } from "../battle/tuning.js";
 import { liveEffects } from "../../services/liveEvents.js";
 import { scaleEarned } from "../liveEventRules.js";
+import { specialBattleProfile } from "../specialVariants.js";
+import { grantSpecial } from "../../services/box.js";
 
 // user.encounter = { day, count, lastAt }: cards posted on that UTC day, and
 // when the last one posted (ms). lastAt survives the day change for the gap.
@@ -65,7 +67,16 @@ export function fightEncounter({ trainerData, userId, encounter: { team, trainer
   const members = buildTeam(user, { ...side, team: team.map((m) => ({ id: m.speciesId, variant: m.variant, ...(m.copyUid && { uid: m.copyUid }), ...(m.megaForm && { mega: m.megaForm }) })) });
   if (!members.length) return { ok: false, reason: "no_team" };
 
-  const foes = trainer.party.map((m) => ({ speciesId: m.speciesId, variant: "normal", name: speciesName(m.speciesId), level: m.level }));
+  // A party member may bring its own look (variant), name, moves and a
+  // fight-only stat boost (the Squirtle Squad, utils/encounter/squad.js);
+  // a Special variant with base stats fights with them.
+  const foes = trainer.party.map((m) => {
+    const profile = specialBattleProfile(m.variant);
+    return {
+      speciesId: m.speciesId, variant: m.variant ?? "normal", name: m.name ?? speciesName(m.speciesId), level: m.level,
+      ...(m.moves && { moves: [...m.moves] }), ...(m.statMult && { statMult: m.statMult }), ...(profile && { battleProfile: profile }),
+    };
+  });
   const result = simulateBattle({ sides: [{ members }, { members: foes }], seed, surge: null });
   const won = result.winner === 0;
   const knockedOut = result.knockouts.filter((k) => k.bySide === 0).map((k) => foes[k.slot]);
@@ -81,11 +92,14 @@ export function fightEncounter({ trainerData, userId, encounter: { team, trainer
     paid = Math.min(trainer.prize, Math.max(0, user.cc ?? 0));
     user.cc = (user.cc ?? 0) - paid;
   }
-  // Achievements for Levels gained. Not a "battle" event: that moves Battle win streaks.
+  // The Squirtle Squad's prize: the Leader on a first win; a player who has it gets nothing more.
+  const special = trainer.squad && won ? { key: "squad-leader", granted: grantSpecial(user, "squad-leader", { at: now.getTime() }).granted } : null;
+  // Achievements for Levels gained (and a new Pokédex entry). Not a "battle" event: that moves Battle win streaks.
   trackProgress(user, [{ type: "pokemon" }], now.getTime());
   return {
     ok: true, userId, trainer,
     sides: [{ userId, members }, { userId: "trainer", members: foes }],
     surge: null, result, winnerId: won ? userId : "trainer", won, exp, prize: won ? winnings : trainer.prize, paid,
+    ...(special && { special }),
   };
 }

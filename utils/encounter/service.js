@@ -32,6 +32,7 @@ import { threaded } from "../render/renderers.js";
 import { cardImage } from "../render/stage.js";
 import { liveEffects } from "../../services/liveEvents.js";
 import { scaleChance } from "../liveEventRules.js";
+import { squadFromSeed, squadTrainer } from "./squad.js";
 
 const PREFIX = "encounter:";
 export const isEncounterButton = (customId) => typeof customId === "string" && customId.startsWith(PREFIX);
@@ -65,6 +66,9 @@ export function createEncounterService({
   play = playEncounter,
   log = logEvent,
   recordFight = storeFight,
+  // Called with { userId, displayName, channel } when a Squirtle Squad win
+  // grants the Leader (bot_final posts it to the reward channels).
+  announce = async () => {},
 }) {
   const open = new Map(); // nonce -> { nonce, userId, displayName, team, trainer, seed, channel, message, timer, deadline, busy }
   // Encounters answered or expired, so a late click is ignored instead of
@@ -93,8 +97,9 @@ export function createEncounterService({
       new ButtonBuilder().setCustomId(`${PREFIX}${e.nonce}:run`).setLabel("Run").setStyle(ButtonStyle.Secondary),
     );
     // A Live event's Prize money multiplier: wins pay more, the card's figure stays the loss.
+    // The Squirtle Squad plays for no CC, so it gets no note.
     const prizeMult = liveEffects().prize;
-    const bonus = prizeMult !== 1 ? ` · 🎪 a win pays ×${prizeMult}` : "";
+    const bonus = prizeMult !== 1 && !e.trainer.squad ? ` · 🎪 a win pays ×${prizeMult}` : "";
     const base = { content: `<@${e.userId}>${bonus}`, allowedMentions: { users: [e.userId] }, components: [buttons] };
     try {
       // Animated when the render threads have room, else the still PNG.
@@ -103,7 +108,7 @@ export function createEncounterService({
     } catch (err) {
       console.warn("⚠️ encounter card render failed; sending an embed:", err?.message || err);
       const embed = new EmbedBuilder().setColor(0xff5a6a).setTitle(view.heading)
-        .setDescription(`"${view.line}"\n` + (view.prizes ? view.prizes.map((p) => `${p.label} team: **${n(p.prize)} CC**`).join(" · ") : `Win or lose: **${n(view.prize)} CC**`));
+        .setDescription(`"${view.line}"\n` + (view.stakes ? `Prize: **${view.stakes}**` : view.prizes ? view.prizes.map((p) => `${p.label} team: **${n(p.prize)} CC**`).join(" · ") : `Win or lose: **${n(view.prize)} CC**`));
       return { ...base, embeds: [embed] };
     }
   }
@@ -133,13 +138,14 @@ export function createEncounterService({
         // same seed, so class, name, size and lines match; Levels and prize
         // follow each team. The card shows the first (Casual when set).
         const s = seed();
+        const squad = squadFromSeed(s); // the Squirtle Squad, for whichever team is picked
         const picks = availablePicks(user);
         const byPick = {};
         for (const p of picks) {
           const team = teamForPick(user, p);
           byPick[p] = {
             team: team.map(({ speciesId, variant, megaForm, copyUid }) => ({ speciesId, variant, ...(copyUid && { copyUid }), ...(megaForm && { megaForm }) })),
-            trainer: rollTrainer({ team, seed: s }),
+            trainer: squad ? squadTrainer() : rollTrainer({ team, seed: s }),
           };
         }
         const entry = {
@@ -175,7 +181,8 @@ export function createEncounterService({
   // beside it would show both cropped. The bot never edits or removes it.
   async function expMessage(outcome, names, note) {
     const user = getTrainerData()[outcome.userId];
-    const caption = [note, outcome.won ? null : `You paid ${names.trainer} ${n(outcome.paid)} CC.`].filter(Boolean).join("\n");
+    // The Squirtle Squad plays for no CC, so a loss pays nothing.
+    const caption = [note, outcome.won || outcome.trainer.squad ? null : `You paid ${names.trainer} ${n(outcome.paid)} CC.`].filter(Boolean).join("\n");
     try {
       const png = await renderExp({
         opponent: names.trainer, won: outcome.won, rating: null, surge: false, pot: 0,
@@ -215,6 +222,11 @@ export function createEncounterService({
     record(e.userId, { phase: "result", won: outcome.won, prize: outcome.prize, paid: outcome.paid });
     recordFight(() => encounterRecord(outcome, e.displayName, getTrainerData())); // Battle Records; never throws
     const names = encounterNames(outcome, e.displayName);
+    if (outcome.special?.granted) {
+      // Fire-and-forget, like every reward broadcast: the card's replay doesn't wait on it.
+      Promise.resolve().then(() => announce({ userId: e.userId, displayName: e.displayName, channel: e.channel }))
+        .catch((err) => console.warn("⚠️ Squirtle Squad announcement failed:", err?.message || err));
+    }
     const user = getTrainerData()[e.userId];
     let note = null;
     try {
