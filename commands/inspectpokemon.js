@@ -19,6 +19,11 @@ import { autoMoveset } from "../utils/battle/moveset.js";
 import { chosenMoves } from "../services/movesets.js";
 import { formatTypesLine } from "./pokedex.js";
 import { threaded } from "../utils/render/renderers.js";
+import { ownsVariant } from "../services/box.js";
+import { VARIANT_KEYS, specialBattleProfile } from "../utils/specialVariants.js";
+
+// Every Variant the player owns, a Special one (the Squirtle Squad Leader) included (read from the box).
+const ownedVariants = (user, id) => VARIANT_KEYS.filter((v) => ownsVariant(user, id, v));
 
 const statLine = (s) => `HP ${s.hp} · Atk ${s.atk} · Def ${s.def} · SpA ${s.spa} · SpD ${s.spd} · Spe ${s.spe}`;
 
@@ -27,7 +32,7 @@ const statLine = (s) => `HP ${s.hp} · Atk ${s.atk} · Def ${s.def} · SpA ${s.s
 // team's too when it has its own); base stats when they own none.
 export function battleInfo(user, speciesId) {
   const species = getSpecies(speciesId);
-  const owned = ["normal", "shiny"].filter((v) => (user?.pokemon?.[speciesId]?.[v] ?? 0) > 0);
+  const owned = ownedVariants(user, speciesId);
   if (!owned.length) return `Base stats: ${statLine(species.baseStats)}`;
   return owned.map((variant) => {
     const { level } = getTraining(user, speciesId, variant);
@@ -35,9 +40,10 @@ export function battleInfo(user, speciesId) {
     const display = chosenMoves(user, "display", speciesId, variant);
     const battle = chosenMoves(user, "battle", speciesId, variant);
     const moves = names(display ?? autoMoveset(speciesId, level));
-    const label = variant === "shiny" ? `✨ shiny Lv ${level}` : `Lv ${level}`;
+    const special = specialBattleProfile(variant); // its own name and base stats
+    const label = special ? `${special.name} Lv ${level}` : variant === "shiny" ? `✨ shiny Lv ${level}` : `Lv ${level}`;
     const battleLine = battle ? `\nRanked team moves: ${names(battle)}` : "";
-    return `**Your ${label}** · ${statLine(computeStats(species.baseStats, level))}\nMoves: ${moves}${battleLine}`;
+    return `**Your ${label}** · ${statLine(computeStats((special ?? species).baseStats, level))}\nMoves: ${moves}${battleLine}`;
   }).join("\n\n");
 }
 
@@ -95,7 +101,7 @@ export default {
  */
 export function inspectSlots(user, pokemon) {
   const id = Number(pokemon.id);
-  const owned = ["normal", "shiny"].filter((v) => (user?.pokemon?.[id]?.[v] ?? 0) > 0);
+  const owned = ownedVariants(user, id);
   if (owned.length) {
     // The card shows the Casual team's chosen moves, else the automatic ones.
     return owned.map((variant) => {

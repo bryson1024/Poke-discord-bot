@@ -109,7 +109,7 @@ flyctl secrets unset RESTORE_FROM CONFIRM_RESTORE -a poke-discord-bot-49shta
 2. `flyctl releases -a poke-discord-bot-49shta`, then `flyctl deploy -a poke-discord-bot-49shta --image <image of the previous release>`.
 3. Open a PR that reverts the bad merge on `master`. **Don't force-push.** Merging the revert deploys again.
 
-The player-data format is unchanged across these releases, so older code can load the newer Discord backups. It ignores the metadata in the message text and simply takes the newest attachment.
+The player-data format is unchanged across these releases, so older code can load the newer Discord backups. It ignores the metadata in the message text and simply takes the newest attachment. There's one exception. Since the Squirtle Squad release, a box copy can carry `variant` (the Squirtle Squad Leader). The release before it loads the Leader as a plain Squirtle and drops a TM-trained Leader's TM moves. [`docs/adr/0002-special-variants.md`](docs/adr/0002-special-variants.md) lists what comes back after rolling forward again.
 
 ## Production host (VPS)
 

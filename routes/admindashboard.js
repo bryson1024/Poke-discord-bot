@@ -42,7 +42,6 @@ import { listInventory, validateHoldableItem } from "../services/inventory.js";
 import { normalizeTrainers } from "../services/assets.js";
 import { loadTrainerSprites } from "../utils/dataLoader.js";
 import { rankedRecord } from "../utils/battle/rewards.js";
-import { copiesOf } from "../services/box.js";
 import { mountLiveEventRoutes } from "./liveEventsAdmin.js";
 
 const toNumber = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);

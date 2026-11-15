@@ -30,6 +30,7 @@ import { expForLevel, floorLevel } from "../utils/training.js";
 import {
   COPY_UID_PATTERN, copyOf, copiesOf, spareCopies, isOnTeam, slotsHolding, takeCopy,
   syncLine, registerDex, newCopyUid as newBoxUid, TEAM_FIELDS, normalizeBox, variantOf, isSpecialCopy,
+  slotVariant,
 } from "./box.js";
 import { isSpecialVariant, specialVariant, normalizeVariant, VARIANT_KEYS } from "../utils/specialVariants.js";
 
@@ -392,6 +393,12 @@ export function normalizeCustomPokemon(user) {
   for (const field of TEAM_FIELDS) {
     if (!Array.isArray(user[field])) continue;
     for (const slot of user[field]) {
+      // Casual and Showcase: the Leader's slot as the previous release saved it
+      // ("normal" with the Leader's uid) gets its Variant back first (docs/adr/0002).
+      if (slot && typeof slot === "object" && field !== "battleTeam") {
+        const v = slotVariant(user, slot);
+        if (isSpecialVariant(v) && slot.variant !== v) { slot.variant = v; res.changed = true; }
+      }
       if (slot && typeof slot === "object" && "uid" in slot && !slotCopyUid(user, slot) && !slotBoxUid(user, slot)) {
         delete slot.uid;
         res.changed = true;

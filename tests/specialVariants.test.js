@@ -50,6 +50,7 @@ import { levelsForUser } from "../utils/training.js";
 import { powersFromLevels } from "../utils/battle/power.js";
 import * as adminChanges from "../services/adminChanges.js";
 import { validateMoveset } from "../services/movesets.js";
+import { inspectSlots, battleInfo } from "../commands/inspectpokemon.js";
 
 const pokemonData = JSON.parse(readFileSync(new URL("../pokemonData.json", import.meta.url), "utf8"));
 const economy = {
@@ -519,6 +520,8 @@ section("final review");
   u.displayedPokemon = coerced();
   u.showcaseTeam = coerced();
   u.battleTeam = coerced();
+  // normalizeUserSchema's order (bot_final.js): customized copies, Casual, Ranked, box, Showcase.
+  normalizeCustomPokemon(u);
   normalizeDisplayedTeam(u);
   battleTeam.normalizeBattleTeam(u);
   normalizeBox(u);
@@ -530,6 +533,7 @@ section("final review");
   const { uid: solo } = grantSpecial(only, "squad-leader");
   only.displayedPokemon = [{ id: 7, variant: "normal", uid: solo }];
   only.battleTeam = [{ id: 7, variant: "normal", uid: solo }];
+  normalizeCustomPokemon(only);
   normalizeDisplayedTeam(only);
   battleTeam.normalizeBattleTeam(only);
   normalizeBox(only);
@@ -566,6 +570,19 @@ section("final review");
   assertTrue(!plainRemove.ok && /They have 0/.test(plainRemove.error), "removing a plain Squirtle from a Leader-only player says they have none");
   const rows = adminChanges.pokemonRows?.(squad().u) ?? [];
   assertEqual(rows.map((x) => [x.variant, x.name, x.count, x.copies.length]), [["normal", "Squirtle", 2, 2], ["squad-leader", "Squirtle Squad Leader", 1, 1]], "the admin player view lists the Leader on its own row");
+}
+
+{
+  // /inspectpokemon and /pokedex "Your stats": the Leader gets its own card, never a plain Squirtle stand-in.
+  const only = {};
+  grantSpecial(only, "squad-leader");
+  normalizeBox(only);
+  const s = inspectSlots(only, { id: 7 });
+  assertEqual(s.map((x) => [x.variant, x.name, x.level, x.stats]), [["squad-leader", "Squirtle Squad Leader", 25, computeStats(LEADER_STATS, 25)]], "a Leader-only player's Your stats shows the Leader, not a plain Squirtle");
+  const { u } = squad();
+  assertEqual(inspectSlots(u, { id: 7 }).map((x) => [x.variant, x.level]), [["normal", 30], ["squad-leader", 25]], "beside plain Squirtle, the Leader has its own card");
+  const st = computeStats(LEADER_STATS, 25);
+  assertTrue(battleInfo(only, 7).includes(`Squirtle Squad Leader Lv 25** · HP ${st.hp}`) && !/\*\*Your Lv/.test(battleInfo(only, 7)), "the text fallback names the Leader with its own stats");
 }
 
 finish();
