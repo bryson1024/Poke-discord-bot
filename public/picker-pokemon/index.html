@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Collection · Coop’s Collection</title>
+    <title>Collection · Coop's Collection</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
@@ -105,12 +105,24 @@
           <label class="sr-only" for="sortOrder">Sort</label>
           <select id="sortOrder">
             <option value="dex">Sort: Pokédex #</option>
-            <option value="power-desc">Sort: Power (high → low)</option>
-            <option value="power-asc">Sort: Power (low → high)</option>
+            <option value="power-desc">Sort: Power at your Level (high → low)</option>
+            <option value="power-asc">Sort: Power at your Level (low → high)</option>
+            <option value="power50-desc">Sort: Power at Lv 50, Ranked (high → low)</option>
             <option value="level-desc">Sort: Level (high → low)</option>
             <option value="level-asc">Sort: Level (low → high)</option>
             <option value="newest">Sort: Newest first</option>
             <option value="name">Sort: Name (A → Z)</option>
+          </select>
+          <button type="button" class="cc-info-btn" data-power-info aria-label="What is Power?" title="What is Power?">i</button>
+
+          <label class="sr-only" for="extraFilter">Show</label>
+          <select id="extraFilter">
+            <option value="">All copies</option>
+            <option value="team">On a team</option>
+            <option value="free">Not on a team</option>
+            <option value="trained">Trained (TM)</option>
+            <option value="evolve">Can evolve</option>
+            <option value="dupes">Duplicates</option>
           </select>
 
           <!-- The box shows owned Pokémon only; missing ones are on the Pokédex page. -->
@@ -120,6 +132,7 @@
         </div>
 
         <div id="regionChips" class="region-chips" role="group" aria-label="Region"></div>
+        <div id="activeFilters" class="active-filters" aria-label="Active filters" hidden></div>
 
         <div id="pokemonGrid">
           <p class="cc-empty">Loading your Pokémon…</p>

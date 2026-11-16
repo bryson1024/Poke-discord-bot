@@ -27,9 +27,12 @@ import { playerId, showBanner, showExpired, toast, showActionError, confirmDialo
 import { displaySpeciesName } from "/public/shared/names.js";
 import { scanFx } from "/public/shared/spriteFx.js";
 import { openMovesEditor } from "/public/teams/moves.js";
+import { loadPlans, planRowHtml, savePlan, recommendedFor } from "/public/teams/plans.js";
 import { chooseCopy } from "/public/teams/copyPicker.js";
 import { openItemPicker, itemIcon, claimStarter } from "/public/teams/items.js";
 import { openDetail } from "/public/picker-pokemon/detail.js";
+import { powerInfoButton } from "/public/shared/powerInfo.js";
+import { viewState, setUrlParam, debounce } from "/public/shared/viewState.js";
 
 const TEAMS = ["showcase", "display", "battle"];
 const LABEL = { showcase: "Showcase team", display: "Casual team", battle: "Ranked team" };
@@ -50,6 +53,11 @@ const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 const app = document.getElementById("teamsApp");
+// Phones show the box in a bottom sheet, wider screens in the side panel:
+// draw it in one place only (it is ~370 tiles for a big collection).
+const NARROW = window.matchMedia("(max-width: 820px)");
+// Filters, sort and team survive a trip to another page (this browser tab only).
+const view = viewState("teams", { q: "", show: "all", sort: "power", active: "" });
 const sheet = document.getElementById("boxSheet");
 const sheetBody = document.getElementById("boxSheetBody");
 const userId = playerId();
@@ -58,7 +66,8 @@ const state = {
   data: {},              // pokemonData by id
   pokemon: {},           // owned counts
   levels: {},            // "6:normal" → Level
-  powers: {},            // "6:normal" → Power
+  powers: {},            // "6:normal" → Power at the line's real Level
+  powers50: {},          // "6" → Power at Lv 50 (Ranked and wager battles)
   trained: {},           // "6:normal" → [trained copies] (TM system)
   megaOn: false,
   megaCards: [], // GET /api/mega cards (only while Mega Evolution is on)
@@ -69,12 +78,16 @@ const state = {
   active: "display",
   error: { showcase: null, display: null, battle: null },
   filter: { q: "", show: "all", sort: "power" },
+  // Team check (POST /api/team-check) for the team on screen: { key, data, open }.
+  check: { key: null, data: null, open: false, failed: false },
   saving: false,
   // Held items (GET /api/held-items). enabled false = no item UI at all.
   held: { enabled: false, items: [], groups: [], rev: 0, teams: { showcase: null, display: null, battle: null } },
   // A whole-team copy waiting for Save: { source: "display"|"battle", keys: ["6:normal", …] }.
   // Save sends it as copyFrom so the server copies those Pokémon's moves too.
   copied: { showcase: null, display: null, battle: null },
+  // Battle plans (GET /api/battle-plans, full sim only). enabled false = no plan row.
+  plans: { enabled: false, plans: [], teams: {} },
 };
 
 // ---------- helpers ----------
@@ -97,6 +110,9 @@ const isTrainedCopy = (s) => !!(s.uid && state.copies.find((r) => r[0] === s.uid
 /** The slot's own Level (its copy), else the line's best. */
 const levelOf = (s) => (s.uid && state.copies.find((r) => r[0] === s.uid)?.[3]) ?? state.levels[keyOf(s)] ?? "?";
 const powerOf = (s) => state.powers[keyOf(s)] ?? 0;
+/** Power at Lv 50, the Level Ranked battles use: the Mega form's when the slot uses one. */
+const power50Of = (s) => (s.mega && state.megaOn ? megaCard(s.mega)?.power50 : null) ?? state.powers50[s.id] ?? 0;
+const fmt = (n) => Number(n).toLocaleString("en-US");
 const megaCard = (formId) => state.megaCards.find((c) => c.formId === formId);
 const slotName = (s) => (s.mega && state.megaOn ? megaCard(s.mega)?.name ?? megaName(s) : species(s.id).name);
 /** Mega forms this exact copy can use on a team (unlocked on its line, allowed for teams). */
@@ -147,7 +163,7 @@ function itemControls(t, s, i, name) {
     // Inside the stage, which is itself a button (details): an indicator only.
     // The slot's item button below changes the item.
     badge: it ? `<span class="hi-badge" title="${esc(name)} holds ${esc(it.name)}">${itemIcon(it, { size: "sm" })}</span>` : "",
-    button: `<button type="button" class="hi-slotbtn${it ? " is-set" : ""}" data-act="item" data-team="${t}" data-i="${i}" aria-label="${esc(name)}’s item on your ${LABEL[t]}: ${it ? esc(it.name) : "none"}. Change">${it ? `${itemIcon(it, { size: "xs" })} ${esc(it.name)}` : "＋ Add item"}</button>`,
+    button: `<button type="button" class="hi-slotbtn${it ? " is-set" : ""}" data-act="item" data-team="${t}" data-i="${i}" aria-label="${esc(name)}'s item on your ${LABEL[t]}: ${it ? esc(it.name) : "none"}. Change">${it ? `${itemIcon(it, { size: "xs" })} ${esc(it.name)}` : "＋ Add item"}</button>`,
   };
 }
 /** The team's equipment at a glance (saved loadout). */
@@ -194,7 +210,7 @@ function blockReason(t, s, { replaceAt = -1 } = {}) {
         code: "mythic",
         short: "Mythic limit",
         title: "One mythic-tier Pokémon per Ranked team",
-        text: `${species(s.id).name} can’t join your Ranked team: it already has a mythic-tier Pokémon (${species(other.id).name}). Remove ${species(other.id).name} first, or add ${species(s.id).name} to your Casual team.`,
+        text: `${species(s.id).name} can't join your Ranked team: it already has a mythic-tier Pokémon (${species(other.id).name}). Remove ${species(other.id).name} first, or add ${species(s.id).name} to your Casual team.`,
       };
     }
   }
@@ -216,6 +232,8 @@ let focusAfter = null;
  * replace: swap out the Pokémon at that slot (drag onto a filled slot of a
  * full team). Same rules as the server.
  */
+/** The copy picker's Ranked line: every copy has the same Power there. */
+const rankedCopyNote = (t, s) => (t === "battle" ? `In Ranked, every copy has ${fmt(power50Of(s))} power at Lv ${BATTLE_LEVEL}. A higher real Level knows more moves.` : null);
 const trainedOf = (s) => state.trained[keyOf(s)] ?? [];
 
 function add(t, s, { at = null, replace = false } = {}) {
@@ -227,7 +245,7 @@ function add(t, s, { at = null, replace = false } = {}) {
     const used = list.map((m) => m.uid).filter(Boolean);
     const free = copiesOfLine(s.id, s.variant).filter((c) => !used.includes(c.uid));
     if (free.length > 1) {
-      chooseCopy({ userData: state, pokeId: s.id, variant: s.variant, name: species(s.id).name, exclude: used })
+      chooseCopy({ userData: state, pokeId: s.id, variant: s.variant, name: species(s.id).name, exclude: used, note: rankedCopyNote(t, s) })
         .then((uid) => { if (uid !== undefined) add(t, { ...s, uid }, { at, replace }); });
       return;
     }
@@ -343,7 +361,7 @@ async function copyFrom(target, source = SOURCES[target].find((t) => team(t).len
     kept.push(s);
   }
   const current = state.draft[target];
-  const movesNote = isShowcase(source) || isShowcase(target) ? "Moves and held items aren’t copied (the Showcase has none)." : `Each Pokémon brings its ${LABEL[source]} moves.`;
+  const movesNote = isShowcase(source) || isShowcase(target) ? "Moves and held items aren't copied (the Showcase has none)." : `Each Pokémon brings its ${LABEL[source]} moves.`;
   const msg = [
     current?.length ? `This replaces your ${LABEL[target]} (${current.length} Pokémon). ${movesNote}` : `This fills your ${LABEL[target]}. ${movesNote}`,
     isDirty(target) ? `Your unsaved changes to the ${LABEL[target]} will be replaced.` : "",
@@ -399,7 +417,7 @@ async function save() {
       try { body = await res.json(); } catch { /* non-JSON */ }
       if (res.status === 403) { showExpired(); return; }
       if (!res.ok || !body.success) {
-        const err = new Error(body.error || `Couldn’t save your ${LABEL[t]} (${res.status}).`);
+        const err = new Error(body.error || `Couldn't save your ${LABEL[t]} (${res.status}).`);
         err.team = t;
         throw err;
       }
@@ -417,13 +435,14 @@ async function save() {
       }
     }
     await refreshHeld();
+    if (state.plans.enabled) state.plans = await loadPlans(userId).catch(() => state.plans); // a new lineup can change readiness
     toast(dirty.length > 1 ? "Teams saved." : `${LABEL[dirty[0]]} saved.`, { tone: "success" });
   } catch (err) {
     if (err.team) {
       state.active = err.team;
       if (/mythic/i.test(err.message)) state.error[err.team] = { title: "One mythic-tier Pokémon per Ranked team", text: err.message };
     }
-    showActionError(err, `Couldn’t save your ${err.team ? LABEL[err.team] : "teams"}`);
+    showActionError(err, `Couldn't save your ${err.team ? LABEL[err.team] : "teams"}`);
   } finally {
     state.saving = false;
     render();
@@ -469,7 +488,7 @@ function slotCard(t, s, i) {
   const wasAt = savedList.findIndex((m) => (s.uid && m.uid ? m.uid === s.uid : keyOf(m) === keyOf(s)));
   const change = wasAt === -1 ? "New" : wasAt !== i ? "Moved" : null;
   const lvl = isB
-    ? `<span class="tm-lv tm-lv--fixed" title="Ranked and wager battles use Lv ${BATTLE_LEVEL}"><b>Lv ${BATTLE_LEVEL}</b><small>yours Lv ${levelOf(s)}</small></span>`
+    ? `<span class="tm-lv tm-lv--fixed" title="Ranked and wager battles use Lv ${BATTLE_LEVEL}"><b>Lv ${BATTLE_LEVEL}</b><small title="It fights at Lv ${BATTLE_LEVEL} but knows only the moves learned by its real Level">${fmt(power50Of(s))} power · yours Lv ${levelOf(s)}</small></span>`
     : `<span class="tm-lv"><b>Lv ${levelOf(s)}</b></span>`;
   const tags = [
     i === 0 && !sc ? `<span class="tm-tag tm-tag--lead">Lead</span>` : "",
@@ -493,7 +512,7 @@ function slotCard(t, s, i) {
       <div class="tm-slot-meta">${lvl}</div>
       ${typeChips(s.id)}
       <div class="tm-slot-tags">${tags}</div>
-      ${sc ? "" : `<button type="button" class="tm-movesbtn" data-act="moves" data-team="${t}" data-i="${i}" aria-label="${esc(species(s.id).name)}’s moves on your ${LABEL[t]}">Moves</button>`}
+      ${sc ? "" : `<button type="button" class="tm-movesbtn" data-act="moves" data-team="${t}" data-i="${i}" aria-label="${esc(species(s.id).name)}'s moves on your ${LABEL[t]}">Moves</button>`}
       ${copies > 1 ? `<button type="button" class="tm-movesbtn" data-act="pickcopy" data-team="${t}" data-i="${i}" aria-label="Change which ${esc(species(s.id).name)} is in this slot (you have ${copies})">Change copy</button>` : ""}
       ${ic.button}
       ${state.megaOn && megaFormsFor(s).length ? `<button type="button" class="tm-megabtn${s.mega ? " is-on" : ""}" data-act="mega" data-team="${t}" data-i="${i}" aria-label="Mega form for ${esc(species(s.id).name)}: ${s.mega ? esc(megaCard(s.mega)?.name ?? s.mega) : "off"}. Change">${s.mega ? `Mega: ${esc((megaCard(s.mega)?.name ?? s.mega).replace(/^Mega /, ""))}` : "Mega: off"}</button>` : ""}
@@ -507,6 +526,60 @@ function slotCard(t, s, i) {
   </li>`;
 }
 
+// ---------- Team check ----------
+const fmtN = (n) => Number(n).toLocaleString("en-US");
+function teamCheckPanel() {
+  const c = state.check;
+  const d = c.data;
+  const summary = d?.headline ? esc(d.headline.text) : d ? "No big shared weakness." : c.failed ? "Couldn't load the team check." : "Checking…";
+  let body = "";
+  if (d) {
+    const rows = [...d.weaknesses].filter((w) => w.weak || w.resist || w.immune)
+      .sort((a, b) => b.weak - a.weak || (a.resist + a.immune) - (b.resist + b.immune)).slice(0, 8);
+    const cell = (n, cls) => `<td class="${n ? cls : "is-zero"}">${n}</td>`;
+    body = `
+      ${d.headline?.tryTypes?.length ? `<p class="tm-check-tip">Types that resist ${esc(d.headline.type)}: ${d.headline.tryTypes.map((x) => `<span class="cc-type" data-type="${esc(x.toLowerCase())}">${esc(x)}</span>`).join(" ")}</p>` : ""}
+      <div class="tm-check-scroll"><table class="tm-check-table">
+        <thead><tr><th scope="row">Attack</th>${rows.map((w) => `<th scope="col"><span class="cc-type" data-type="${esc(w.type.toLowerCase())}">${esc(w.type)}</span></th>`).join("")}</tr></thead>
+        <tbody>
+          <tr><th scope="row">Weak ×2+</th>${rows.map((w) => cell(w.weak, "is-weak")).join("")}</tr>
+          <tr><th scope="row">Resist</th>${rows.map((w) => cell(w.resist, "is-resist")).join("")}</tr>
+          <tr><th scope="row">Immune</th>${rows.map((w) => cell(w.immune, "is-resist")).join("")}</tr>
+        </tbody></table></div>
+      <h4>Moves picked</h4>
+      <p class="tm-check-types">${d.moves.types.map((x) => `<span class="cc-type" data-type="${esc(x.type.toLowerCase())}">${esc(x.type)} ×${x.count}</span>`).join(" ") || "No damaging moves."}</p>
+      <p class="tm-sub">Physical ${d.moves.mix.Physical} · Special ${d.moves.mix.Special} · Status ${d.moves.mix.Status}${d.moves.noSuperEffective.length ? `. Nothing hits ${d.moves.noSuperEffective.map(esc).join(", ")} for ×2.` : ""}</p>
+      <h4>Speed${d.level ? ` at Lv ${d.level}` : ""} (who moves first)</h4>
+      <p class="tm-sub">${d.speed.map((x) => `${esc(x.name)} ${fmtN(x.speed)}`).join(" · ")}</p>
+      <p class="tm-sub tm-check-note">Type matchups only; abilities aren't counted. Includes unsaved changes.</p>`;
+  }
+  return `<details class="tm-check" id="teamCheck"${c.open ? " open" : ""}>
+    <summary><span class="tm-check-title">Team check</span><span class="tm-check-head">${summary}</span></summary>${body}</details>`;
+}
+let checkTimer = null;
+/** Ask the server for the check of the team on screen (debounced; only when the team changed). */
+function scheduleCheck() {
+  const t = state.active;
+  if (isShowcase(t) || !team(t).length) return;
+  const slots = team(t).map((s) => ({ id: s.id, variant: s.variant, ...(s.mega && state.megaOn ? { mega: s.mega } : {}), ...(s.uid ? { uid: s.uid } : {}) }));
+  const key = JSON.stringify([t, slots]);
+  if (key === state.check.key) return;
+  state.check = { ...state.check, key, data: null, failed: false };
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(async () => {
+    try {
+      const r = await fetch("/api/team-check", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: userId, team: t, slots }) });
+      const d = r.ok ? await r.json() : null;
+      if (state.check.key !== key) return; // the team changed meanwhile
+      state.check.data = d;
+      state.check.failed = !d;
+    } catch { if (state.check.key === key) state.check.failed = true; }
+    const el = document.getElementById("teamCheck");
+    if (el) { el.outerHTML = teamCheckPanel(); }
+  }, 250);
+}
+app.addEventListener("toggle", (e) => { if (e.target.id === "teamCheck") state.check.open = e.target.open; }, true);
+
 function rules() {
   const list = team("battle");
   const mythic = list.filter((s) => isMythic(s.id)).length;
@@ -517,6 +590,7 @@ function rules() {
     <li class="tm-rule${err ? " is-error" : mythic >= 1 ? " is-full" : ""}">Mythic <b>${mythic}/1</b></li>
     ${state.megaOn ? `<li class="tm-rule${mega >= 1 ? " is-full" : ""}">Mega <b>${mega}/1</b></li>` : ""}
     <li class="tm-rule">Slots <b>${list.length}/6</b></li>
+    ${list.length ? `<li class="tm-rule">Team power at Lv ${BATTLE_LEVEL} <b>${fmt(list.reduce((n, s) => n + power50Of(s), 0))}</b>${powerInfoButton()}</li>` : ""}
   </ul>`;
 }
 
@@ -547,12 +621,12 @@ function teamPanel() {
     ? `<div class="tm-notice" role="status"><p>${state.notices.map((n) => esc(n.text)).join("<br>")}</p><button type="button" class="cc-btn" data-act="dismiss">Got it</button></div>`
     : "";
   const e = state.error[t];
-  const err = e ? `<div class="tm-error" role="alert"><svg class="tm-ic" aria-hidden="true"><use href="#tm-lock"/></svg><p><strong>${esc(e.title ?? "Can’t add that Pokémon")}</strong>${esc(e.text)}</p></div>` : "";
+  const err = e ? `<div class="tm-error" role="alert"><svg class="tm-ic" aria-hidden="true"><use href="#tm-lock"/></svg><p><strong>${esc(e.title ?? "Can't add that Pokémon")}</strong>${esc(e.text)}</p></div>` : "";
   const copyBtn = list.length
     ? SOURCES[t].filter((o) => team(o).length).map((o) => `<button type="button" class="cc-btn tm-copyteam" data-act="copy" data-team="${t}" data-source="${o}">Copy from ${LABEL[o].replace(" team", "")}</button>`).join("")
     : "";
   return `<section id="teamPanel" class="tm-panel tm-panel--${t} tm-team" role="tabpanel" aria-labelledby="tab-${t}">
-    <div class="tm-panel-head">${head}<div class="tm-copyteams">${copyBtn}</div></div>${note}${isShowcase(t) ? "" : loadoutSummary(t)}${body}${err}
+    <div class="tm-panel-head">${head}<div class="tm-copyteams">${copyBtn}</div></div>${note}${isShowcase(t) ? "" : loadoutSummary(t)}${isShowcase(t) ? "" : planRowHtml(t, state.plans)}${body}${err}${isShowcase(t) || !list.length ? "" : teamCheckPanel()}
     <button type="button" class="cc-btn tm-addbtn" data-act="openbox"><svg class="tm-ic" aria-hidden="true"><use href="#tm-plus"/></svg>Add from your box</button>
   </section>`;
 }
@@ -579,6 +653,7 @@ function boxItems() {
     if ((v?.shiny ?? 0) > 0) out.push({ id, variant: "shiny", count: v.shiny });
   }
   const { q, show, sort } = state.filter;
+  const ranked = state.active === "battle";
   const qq = q.trim().toLowerCase();
   const list = out.filter((s) => {
     if (show === "shiny" && s.variant !== "shiny") return false;
@@ -587,7 +662,10 @@ function boxItems() {
     return true;
   });
   const by = {
-    power: (a, b) => powerOf(b) - powerOf(a) || a.id - b.id,
+    // Ranked fights at Lv 50: sort on that, then real Level (it decides the moves).
+    power: ranked
+      ? (a, b) => power50Of(b) - power50Of(a) || (Number(levelOf(b)) || 0) - (Number(levelOf(a)) || 0) || a.id - b.id
+      : (a, b) => powerOf(b) - powerOf(a) || a.id - b.id,
     level: (a, b) => (Number(levelOf(b)) || 0) - (Number(levelOf(a)) || 0) || a.id - b.id,
     dex: (a, b) => a.id - b.id || (a.variant === "shiny") - (b.variant === "shiny"),
     name: (a, b) => species(a.id).name.localeCompare(species(b.id).name),
@@ -603,7 +681,8 @@ function boxTile(s) {
   const shiny = s.variant === "shiny";
   const blocked = why && why.code === "mythic";
   const n = copiesOfLine(s.id, s.variant).length;
-  const label = `${sp.name}${shiny ? " (shiny)" : ""}, Lv ${levelOf(s)}${n > 1 ? `, you have ${n}` : ""}${why ? `. ${why.short}` : `. Add to your ${LABEL[t]}`}`;
+  const ranked = t === "battle";
+  const label = `${sp.name}${shiny ? " (shiny)" : ""}, ${ranked ? `${fmt(power50Of(s))} power at Lv ${BATTLE_LEVEL}, yours Lv ${levelOf(s)}` : `Lv ${levelOf(s)}`}${n > 1 ? `, you have ${n}` : ""}${why ? `. ${why.short}` : `. Add to your ${LABEL[t]}`}`;
   return `<li class="tm-tile${shiny ? " is-shiny" : ""}${blocked ? " is-blocked" : ""}${why?.code === "on" ? " is-on" : ""}">
     <button type="button" class="tm-tile-btn" data-act="add" data-id="${s.id}" data-variant="${s.variant}" aria-label="${esc(label)}" draggable="true">
       <span class="tm-tile-badges">${badges}</span>
@@ -612,29 +691,47 @@ function boxTile(s) {
       <span class="tm-tile-art"${shiny ? ` data-fx="shiny" data-fx-seed="${s.id}"` : ""}><img class="cc-sprite" src="/public/sprites/pokemon/${shiny ? "shiny" : "normal"}/${s.id}.gif" alt="" loading="lazy" onerror="this.onerror=null;this.src='/public/sprites/items/pokeball.png'"></span>
       <span class="tm-tile-name">${esc(sp.name)}</span>
       ${typeChips(s.id)}
-      <span class="tm-tile-lv">Lv ${levelOf(s)}${n > 1 ? ` · ×${n}` : ""}${isMythic(s.id) && !blocked ? ` · <b class="tier-text mythic">Mythic</b>` : ""}</span>
+      ${ranked ? `<span class="tm-tile-pw"><b>${fmt(power50Of(s))}</b> at Lv ${BATTLE_LEVEL}</span>` : ""}
+      <span class="tm-tile-lv"${ranked ? ` title="Fights at Lv ${BATTLE_LEVEL}, knows the moves learned by Lv ${levelOf(s)}"` : ""}>${ranked ? "yours " : ""}Lv ${levelOf(s)}${n > 1 ? ` · ×${n}` : ""}${isMythic(s.id) && !blocked ? ` · <b class="tier-text mythic">Mythic</b>` : ""}</span>
     </button>
     <button type="button" class="tm-tile-info" data-act="details-box" data-id="${s.id}" data-variant="${s.variant}" aria-label="${esc(sp.name)}${shiny ? " (shiny)" : ""}: details">i</button></li>`;
 }
 
 function boxPanel(where) {
   const t = state.active;
-  const items = boxItems();
   const f = state.filter;
   const seg = (v, label) => `<button type="button" data-act="show" data-show="${v}" aria-pressed="${f.show === v}">${label}</button>`;
   return `<div class="tm-panel-head"><div>${where === "sheet" ? "" : `<h2 class="tm-h2" id="boxHeading">Add to ${LABEL[t]}</h2>`}
-      <p class="tm-sub">Tap to add.${t === "battle" ? " Locked: would break a Ranked team rule." : ""} S = Showcase, C = Casual, R = Ranked slot.</p></div></div>
+      <p class="tm-sub">Tap to add.${t === "battle" ? ` Locked: would break a Ranked team rule. Power is at Lv ${BATTLE_LEVEL}, the Level Ranked battles use. ${powerInfoButton()}` : ""} S = Showcase, C = Casual, R = Ranked slot.</p></div></div>
     <div class="tm-boxbar">
       <label class="sr-only" for="boxSearch-${where}">Search your Pokémon</label>
       <input id="boxSearch-${where}" type="search" placeholder="Search…" value="${esc(f.q)}" data-act="search" autocomplete="off">
       <label class="sr-only" for="boxSort-${where}">Sort</label>
       <select id="boxSort-${where}" data-act="sort">
-        ${[["power", "Power"], ["level", "Level"], ["dex", "Pokédex #"], ["name", "Name"]].map(([v, l]) => `<option value="${v}"${f.sort === v ? " selected" : ""}>Sort: ${l}</option>`).join("")}
+        ${[["power", t === "battle" ? `Power at Lv ${BATTLE_LEVEL}` : "Power"], ["level", "Level"], ["dex", "Pokédex #"], ["name", "Name"]].map(([v, l]) => `<option value="${v}"${f.sort === v ? " selected" : ""}>Sort: ${l}</option>`).join("")}
       </select>
       <div class="tm-seg" role="group" aria-label="Show">${seg("all", "All")}${seg("shiny", "Shiny")}${seg("free", "Not on a team")}</div>
     </div>
-    ${items.length ? `<ul class="tm-box">${items.map(boxTile).join("")}</ul>` : `<p class="cc-empty">${Object.keys(state.pokemon).length ? "No Pokémon match." : "You haven’t caught any Pokémon yet. Try /daily in Discord."}</p>`}`;
+    <div class="tm-boxlist" data-boxlist="${where}">${boxList()}</div>`;
 }
+
+function boxList(items = boxItems()) {
+  return items.length ? `<ul class="tm-box">${items.map(boxTile).join("")}</ul>` : `<p class="cc-empty">${Object.keys(state.pokemon).length ? "No Pokémon match." : "You haven't caught any Pokémon yet. Try /daily in Discord."}</p>`;
+}
+
+/** Search, sort and Show change only the box: redraw its list, not the page. */
+function refreshBox() {
+  const html = boxList();
+  for (const list of document.querySelectorAll("[data-boxlist]")) {
+    list.innerHTML = html;
+    scanFx(list);
+  }
+  for (const b of document.querySelectorAll('[data-act="show"]')) b.setAttribute("aria-pressed", String(b.dataset.show === state.filter.show));
+  for (const sel of document.querySelectorAll('[data-act="sort"]')) sel.value = state.filter.sort;
+  for (const q of document.querySelectorAll('[data-act="search"]')) if (q !== document.activeElement) q.value = state.filter.q;
+}
+const refreshBoxSoon = debounce(refreshBox, 120);
+const rememberFilter = () => view.set({ q: state.filter.q, show: state.filter.show, sort: state.filter.sort });
 
 function saveBar() {
   if (!anyDirty()) return "";
@@ -650,7 +747,7 @@ function saveBar() {
     return `${LABEL[t]}: ${bits.join(" · ")}`;
   });
   return `<div class="tm-savebar" role="region" aria-label="Unsaved changes">
-    <p><strong>Unsaved changes</strong><span>${esc(parts.join(" — "))}</span></p>
+    <p><strong>Unsaved changes</strong><span>${esc(parts.join(". "))}</span></p>
     <div class="tm-savebar-actions">
       <button type="button" class="cc-btn" data-act="discard"${state.saving ? " disabled" : ""}>Discard</button>
       <button type="button" class="cc-btn cc-btn--primary" data-act="save"${state.saving ? " disabled" : ""}>${state.saving ? "Saving…" : TEAMS.filter(isDirty).length > 1 ? "Save teams" : "Save"}</button>
@@ -673,9 +770,12 @@ document.body.insertAdjacentHTML("afterbegin", ICONS);
 
 function render() {
   const searchFocus = document.activeElement?.dataset?.act === "search" ? { where: document.activeElement.id, pos: document.activeElement.selectionStart } : null;
-  app.innerHTML = `${switcher()}<div class="tm-layout">${teamPanel()}<aside class="tm-panel tm-boxpanel" aria-labelledby="boxHeading">${boxPanel("side")}</aside></div>${saveBar()}`;
+  app.innerHTML = `${switcher()}<div class="tm-layout">${teamPanel()}<aside class="tm-panel tm-boxpanel" aria-labelledby="boxHeading">${NARROW.matches ? "" : boxPanel("side")}</aside></div>${saveBar()}`;
+  if (view.get().active !== state.active) view.set({ active: state.active });
+  if (new URLSearchParams(location.search).get("team") !== state.active) setUrlParam("team", state.active);
   if (sheet.open) { sheetBody.innerHTML = boxPanel("sheet"); scanFx(sheetBody); }
   scanFx(app); // shiny backdrops (same as the Discord cards)
+  scheduleCheck();
   document.getElementById("boxSheetTitle").textContent = `Add to your ${LABEL[state.active]}`;
   if (focusAfter) {
     const el = [focusAfter].flat().map((s) => document.querySelector(s)).find((x) => x && !x.disabled);
@@ -706,7 +806,7 @@ function onClick(e) {
     const s = team(t)[i];
     if (s) {
       const others = team(t).filter((_, k) => k !== i).map((m) => m.uid).filter(Boolean);
-      chooseCopy({ userData: state, pokeId: s.id, variant: s.variant, name: species(s.id).name, current: s.uid ?? null, exclude: others })
+      chooseCopy({ userData: state, pokeId: s.id, variant: s.variant, name: species(s.id).name, current: s.uid ?? null, exclude: others, note: rankedCopyNote(t, s) })
         .then((uid) => {
           if (uid === undefined) return;
           const list = [...team(t)];
@@ -726,7 +826,7 @@ function onClick(e) {
         // Allowed but unwise picks, said plainly (the server allows them, as the games do).
         warningFor: (itemId) => {
           const sp = species(s.id);
-          if (itemId === "eviolite" && !(sp.evolvesTo ?? []).length) return `No effect: ${sp.name} can’t evolve.`;
+          if (itemId === "eviolite" && !(sp.evolvesTo ?? []).length) return `No effect: ${sp.name} can't evolve.`;
           if (itemId === "black_sludge" && !(sp.types ?? []).includes(4)) return `Hurts ${sp.name} every turn: only Poison types are healed.`;
           return null;
         },
@@ -736,18 +836,35 @@ function onClick(e) {
   }
   else if (act === "moves") {
     const s = team(t)[i];
-    if (s) openMovesEditor({ userId, team: t, s, name: species(s.id).name, onSaved: () => render(), onTaught: () => refreshCopies() });
+    if (s) openMovesEditor({ userId, team: t, s, name: species(s.id).name, recommended: recommendedFor(state.plans, t, s), onSaved: () => refreshPlans(), onTaught: () => { refreshCopies(); refreshPlans(); } });
   }
   else if (act === "discard") discard();
   else if (act === "save") save();
-  else if (act === "show") { state.filter.show = el.dataset.show; render(); }
+  else if (act === "show") { state.filter.show = el.dataset.show; rememberFilter(); refreshBox(); }
   else if (act === "openbox") openSheet();
   else if (act === "dismiss") dismissNotices();
 }
+// Plans are saved at once (not with the team's Save bar): a plan isn't part of the team's slots.
+async function refreshPlans() {
+  try { state.plans = await loadPlans(userId); } catch { /* keep what's shown */ }
+  render();
+}
+async function choosePlan(team, plan) {
+  try {
+    state.plans.teams[team] = await savePlan(userId, team, plan);
+    toast("Battle plan saved", { tone: "success" });
+  } catch (err) {
+    if (err.status === 403) return showExpired();
+    showActionError(err, "Couldn’t save the Battle plan");
+  }
+  render();
+}
+
 function onInput(e) {
   const el = e.target;
-  if (el.dataset?.act === "search") { state.filter.q = el.value; render(); }
-  if (el.dataset?.act === "sort") { state.filter.sort = el.value; render(); }
+  if (e.type === "change" && el.dataset?.act === "plan") return choosePlan(el.dataset.team, el.value);
+  if (el.dataset?.act === "search") { state.filter.q = el.value; rememberFilter(); refreshBoxSoon(); }
+  if (el.dataset?.act === "sort") { state.filter.sort = el.value; rememberFilter(); refreshBox(); }
 }
 app.addEventListener("click", onClick);
 app.addEventListener("input", onInput);
@@ -877,7 +994,7 @@ async function leaveTo(href) {
   if (anyDirty()) {
     const leave = await confirmDialog({
       title: "Leave without saving?",
-      message: "Your team changes aren’t saved yet.",
+      message: "Your team changes aren't saved yet.",
       okText: "Leave",
       cancelText: "Stay",
       tone: "error",
@@ -920,13 +1037,13 @@ async function refreshCopies() {
 }
 
 // ---------- Pokémon details (the Collection's drawer) ----------
-const collectionHref = (id, variant) => `/public/picker-pokemon/?${new URLSearchParams({ id: userId, pokemon: id, variant })}`;
+const collectionHref = (id, variant, uid = null) => `/public/picker-pokemon/?${new URLSearchParams({ id: userId, pokemon: id, variant, ...(uid ? { copy: uid } : {}) })}`;
 const apiJSON = async (url) => {
   const res = await fetch(url, { credentials: "same-origin" });
   let body = {};
   try { body = await res.json(); } catch { /* non-JSON */ }
   if (res.status === 403) { showExpired(); throw new Error("Your dashboard link expired."); }
-  if (!res.ok) throw new Error(body.error || `Couldn’t load this Pokémon (${res.status}).`);
+  if (!res.ok) throw new Error(body.error || `Couldn't load this Pokémon (${res.status}).`);
   return body;
 };
 /** Where each copy of a species sits on screen right now (maybe unsaved). */
@@ -948,11 +1065,15 @@ function openTeamDetails(t, i) {
       <button type="button" class="cc-btn" data-act="collection">Open in Collection</button>`,
     onAction: (act, d, variant) => {
       // The slot's own copy (TM system): its trained copy when the variant matches the slot.
-      if (act === "moves") openMovesEditor({ userId, team: t, s: { id: d.id, variant, ...(variant === s.variant && s.uid ? { uid: s.uid } : {}) }, name: species(d.id).name, onSaved: () => render(), onTaught: () => refreshCopies() });
-      else if (act === "collection") leaveTo(collectionHref(d.id, variant));
+      if (act === "moves") {
+        const slot = { id: d.id, variant, ...(variant === s.variant && s.uid ? { uid: s.uid } : {}) };
+        openMovesEditor({ userId, team: t, s: slot, name: species(d.id).name, recommended: recommendedFor(state.plans, t, slot), onSaved: () => refreshPlans(), onTaught: () => { refreshCopies(); refreshPlans(); } });
+      }
+      else if (act === "collection") leaveTo(collectionHref(d.id, variant, variant === s.variant ? s.uid : null));
     },
   }, {
     variant: s.variant,
+    uid: s.uid ?? null, // this slot's copy: its Level and equipped moves (what it battles with)
     level: t === "battle" ? "50" : "real",
     slotsFor: slotsOnScreen(s.id),
     megaName: s.mega && state.megaOn ? slotName(s) : null,
@@ -981,13 +1102,18 @@ function openBoxDetails(s) {
 // ---------- load ----------
 async function load() {
   if (!userId) { app.innerHTML = ""; return; }
+  // Mega cards and held items start with the main data, not after it: each
+  // step in a row costs a round trip on a phone (dashboard UX audit).
+  const megaP = fetch(`/api/mega?id=${encodeURIComponent(userId)}`, { credentials: "same-origin" })
+    .then((m) => (m.ok ? m.json() : null)).catch(() => null);
+  const heldP = refreshHeld();
   try {
     const [pdRes, userRes] = await Promise.all([
       fetch("/public/pokemonData.json", { credentials: "same-origin" }),
       fetch(`/api/user-pokemon?id=${encodeURIComponent(userId)}`, { credentials: "same-origin" }),
     ]);
     if (userRes.status === 403) { app.innerHTML = ""; showExpired(); return; }
-    if (!pdRes.ok || !userRes.ok) throw new Error(`Couldn’t load your teams (${userRes.status}).`);
+    if (!pdRes.ok || !userRes.ok) throw new Error(`Couldn't load your teams (${userRes.status}).`);
     const data = await pdRes.json();
     for (const [id, p] of Object.entries(data)) {
       p.storedName = p.name;
@@ -998,6 +1124,7 @@ async function load() {
     state.pokemon = u.pokemon ?? {};
     state.levels = u.levels ?? {};
     state.powers = u.powers ?? {};
+    state.powers50 = u.powers50 ?? {};
     state.trained = u.trained ?? {};
     state.copies = Array.isArray(u.copies) ? u.copies : [];
     const norm = (list) => (Array.isArray(list) ? list.map(slotFromServer) : null);
@@ -1005,30 +1132,34 @@ async function load() {
     state.notices = Array.isArray(u.notices) ? u.notices.filter((n) => n.kind === "battle_team_trim") : [];
     state.draft = clone(state.saved);
     const want = new URLSearchParams(location.search).get("team");
-    state.active = TEAMS.includes(want) ? want : state.notices.length ? "battle" : "display";
+    const kept = view.get();
+    state.filter = { q: kept.q, show: ["all", "shiny", "free"].includes(kept.show) ? kept.show : "all", sort: ["power", "level", "dex", "name"].includes(kept.sort) ? kept.sort : "power" };
+    // The link's ?team= first, then a notice about the Ranked team, then the last team viewed.
+    state.active = TEAMS.includes(want) ? want : state.notices.length ? "battle" : TEAMS.includes(kept.active) ? kept.active : "display";
   } catch (err) {
     app.innerHTML = "";
-    showBanner(err?.message || "Couldn’t load your teams. Please try again.", { title: "Couldn’t load your teams" });
+    showBanner(err?.message || "Couldn't load your teams. Please try again.", { title: "Couldn't load your teams" });
     return;
   }
   // Mega sprites only while Mega Evolution is switched on server-side.
-  try {
-    const m = await fetch(`/api/mega?id=${encodeURIComponent(userId)}`, { credentials: "same-origin" });
-    const md = m.ok ? await m.json() : null;
-    state.megaOn = !!md?.enabled;
-    state.megaCards = state.megaOn && Array.isArray(md.cards) ? md.cards : [];
-  } catch { state.megaOn = false; }
+  const md = await megaP;
+  state.megaOn = !!md?.enabled;
+  state.megaCards = state.megaOn && Array.isArray(md.cards) ? md.cards : [];
   // Held items (only while switched on server-side). The eight free starter
   // unlocks are claimed on the first visit (idempotent on the server).
-  await refreshHeld();
+  await heldP;
   if (state.held.enabled && state.held.starterPending) {
     try {
       const r = await claimStarter(userId);
       applyHeld(r);
       if (r.granted?.length) toast(`You unlocked ${r.granted.length} free held items! Equip them with the Item button on each Pokémon.`, { tone: "success" });
-    } catch (err) { if (!err.silent) showActionError(err, "Couldn’t unlock your starter items"); }
+    } catch (err) { if (!err.silent) showActionError(err, "Couldn't unlock your starter items"); }
   }
+  try { state.plans = await loadPlans(userId); } catch { /* the page works without plans */ }
   render();
+  view.trackScroll();
+  view.restoreScroll();
 }
 
+NARROW.addEventListener?.("change", () => { if (Object.keys(state.data).length) render(); });
 load();

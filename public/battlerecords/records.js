@@ -61,6 +61,8 @@ export function perspective(record, me) {
     won: record.winner === mine,
     me: record.sides[mine],
     foe: record.sides[theirs],
+    // Your Battle plan (full-sim fights); the server never sends the other side's.
+    plan: record.sides[mine]?.plan?.name ?? null,
     team, kos, fainted,
     foeTeam: last?.members[theirs] ?? [],
     foes: record.fights.map((f) => f.foe).filter(Boolean),
@@ -195,7 +197,8 @@ export function replaySteps(record, me) {
     const push = (extra) => steps.push({ ...base, hp: copyHp(hp), active: [...active], ...extra });
 
     const surge = f.surge ? ` Underdog surge for ${record.sides[f.surge.side]?.name ?? "the underdog"}!` : "";
-    push({ kind: "intro", turn: 0, caption: `${record.sides[mine].name} vs ${foe.name}!${reviveText}${surge}` });
+    const plan = record.sides[mine]?.plan?.name ? ` Your Battle plan: ${record.sides[mine].plan.name}.` : "";
+    push({ kind: "intro", turn: 0, caption: `${record.sides[mine].name} vs ${foe.name}!${reviveText}${surge}${plan}` });
 
     r.log.forEach((events, t) => {
       const turn = t + 1;
@@ -249,4 +252,28 @@ export function stepForTurn(steps, at, dir) {
   let p = start - 1;
   while (p > 0 && key(steps[p - 1]) === prevKey) p--;
   return p;
+}
+
+/**
+ * The fights a Battle Records view shows. Pure, so tests can call it.
+ *   group  "" | "battles" | "challenges" | "encounters" (the tabs)
+ *   result "" | "win" | "loss"
+ *   kind   "" | "ranked" | "casual" | "wager" (battles only)
+ *   q      opponent name, case-insensitive substring (any foe of a run)
+ */
+export function filterRecords(records, { group = "", result = "", kind = "", q = "" } = {}, me) {
+  const needle = String(q).trim().toLowerCase();
+  return records.filter((r) => {
+    if (group && r.group !== group) return false;
+    if (kind && r.kind !== kind) return false;
+    if (!result && !needle) return true;
+    const p = perspective(r, me);
+    if (result === "win" && !p.won) return false;
+    if (result === "loss" && p.won) return false;
+    if (needle) {
+      const names = [p.foe?.name, ...p.foes.map((f) => f?.name)].filter(Boolean).map((n) => String(n).toLowerCase());
+      if (!names.some((n) => n.includes(needle))) return false;
+    }
+    return true;
+  });
 }

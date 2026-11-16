@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Battle Records · Coop’s Collection</title>
+    <title>Battle Records · Coop's Collection</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
@@ -25,6 +25,15 @@
         <button type="button" data-group="battles" aria-pressed="false">Battles</button>
         <button type="button" data-group="challenges" aria-pressed="false">Challenges</button>
         <button type="button" data-group="encounters" aria-pressed="false">Encounters</button>
+      </div>
+      <div class="br-filters" role="search" aria-label="Filter fights">
+        <label class="sr-only" for="brResult">Result</label>
+        <select id="brResult"><option value="">Wins and losses</option><option value="win">Wins</option><option value="loss">Losses</option></select>
+        <span id="brKindWrap"><label class="sr-only" for="brKind">Battle mode</label>
+        <select id="brKind"><option value="">Every mode</option><option value="ranked">Ranked</option><option value="casual">Casual</option><option value="wager">Wager</option></select></span>
+        <label class="sr-only" for="brQ">Opponent</label>
+        <input id="brQ" type="search" placeholder="Opponent name" autocomplete="off">
+        <button type="button" id="brClear" class="br-clear" hidden>Clear filters</button>
       </div>
       <section id="brSummary" class="br-summary" aria-label="Summary" hidden></section>
       <p id="brStatus" class="br-status" aria-live="polite">Loading…</p>

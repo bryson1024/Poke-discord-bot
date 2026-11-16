@@ -9,7 +9,7 @@
 import { playerId, showBanner, showExpired } from "/public/shared/shell.js";
 import { scanFx } from "/public/shared/spriteFx.js";
 import {
-  perspective, summarize, timeAgo, pokemonSprite, trainerSprite, itemLabel, damageBySlot, replaySteps,
+  perspective, summarize, timeAgo, pokemonSprite, trainerSprite, itemLabel, damageBySlot, replaySteps, filterRecords,
 } from "/public/battlerecords/records.js";
 import { openReplay, closeReplay } from "/public/battlerecords/replay.js";
 
@@ -32,6 +32,7 @@ const GROUP_EMPTY = {
 
 let records = [];
 let group = "";
+const filters = { result: "", kind: "", q: "" };
 const full = new Map(); // id -> full record
 
 async function getJSON(url) {
@@ -50,7 +51,8 @@ export async function fullRecord(fightId) {
   return full.get(fightId);
 }
 
-const shown = () => (group ? records.filter((r) => r.group === group) : records);
+const shown = () => filterRecords(records, { group, ...filters }, id);
+const filtered = () => !!(filters.result || filters.kind || filters.q.trim());
 
 // ---------- Summary ----------
 function donut(rate) {
@@ -70,7 +72,7 @@ function renderSummary(list) {
   summaryEl.hidden = false;
   summaryEl.innerHTML = `
     <div class="br-wl">${donut(s.winRate)}
-      <div class="br-wl-text"><p class="br-sum-head">Last ${s.count} fight${s.count === 1 ? "" : "s"}</p>
+      <div class="br-wl-text"><p class="br-sum-head">Last ${s.count} fight${s.count === 1 ? "" : "s"}${filters.q.trim() ? ` vs "${esc(filters.q.trim())}"` : ""}</p>
         <p class="br-big">${s.wins}W ${s.losses}L</p>${ratingLine}</div></div>
     <div><p class="br-sum-head">KOs / faints</p><p class="br-kda">${s.kos} / ${s.faints}</p><p class="br-muted">${s.kda}:1 · ${(s.kos / s.count).toFixed(1)} KOs a fight</p></div>
     <div><p class="br-sum-head">Most used</p><ul class="br-top">${s.top.map((m) => {
@@ -117,7 +119,13 @@ function rowHtml(r) {
 function renderList() {
   const list = shown();
   renderSummary(list);
-  statusEl.textContent = list.length ? `${list.length} fight${list.length === 1 ? "" : "s"} · newest first` : GROUP_EMPTY[group];
+  const q = filters.q.trim();
+  statusEl.textContent = list.length
+    ? `${list.length} fight${list.length === 1 ? "" : "s"}${q ? ` vs "${q}"` : ""} · newest first`
+    : filtered() ? "No fights match these filters." : GROUP_EMPTY[group];
+  document.getElementById("brClear").hidden = !filtered();
+  // Ranked / Casual / Wager only make sense for player battles.
+  document.getElementById("brKindWrap").hidden = !(group === "" || group === "battles");
   listEl.innerHTML = list.map(rowHtml).join("");
   scanFx(document.getElementById("ccMain"));
 }
@@ -125,7 +133,7 @@ function renderList() {
 // ---------- Expanded row ----------
 function teamTable(title, members, { kos = [], dmg = [] } = {}) {
   return `<div class="br-table"><h3>${esc(title)}</h3><div class="br-scroll"><table>
-    <thead><tr><th>Pokémon</th><th>Moves</th><th>Item</th><th class="num">KOs</th><th class="num" title="Damage dealt, as a share of one Pokémon’s full HP">Damage<br><span class="br-muted">% of HP</span></th></tr></thead>
+    <thead><tr><th>Pokémon</th><th>Moves</th><th>Item</th><th class="num">KOs</th><th class="num" title="Damage dealt, as a share of one Pokémon's full HP">Damage<br><span class="br-muted">% of HP</span></th></tr></thead>
     <tbody>${members.map((m, i) => `<tr>
       <td class="mon"><img src="${pokemonSprite(m)}" alt="" ${FALLBACK}>${esc(m.name)}${m.variant === "shiny" ? " ✨" : ""} <span class="br-muted">Lv ${m.level}${m.realLevel ? ` (real ${m.realLevel})` : ""}</span></td>
       <td class="moves">${esc((m.moves ?? []).join(", "))}</td>
@@ -175,7 +183,7 @@ async function expand(li) {
       <div class="br-actions"><button type="button" class="cc-btn cc-btn--primary" data-watch>▶ Watch</button></div>
       ${fightsHtml(r, p)}
       <div class="br-tables">
-        ${teamTable(`${p.me?.name ?? "You"}`, p.team, { kos: p.kos, dmg: damageBySlot(r, p.mine) })}
+        ${teamTable(`${p.me?.name ?? "You"}${p.plan ? ` · ${p.plan}` : ""}`, p.team, { kos: p.kos, dmg: damageBySlot(r, p.mine) })}
         ${lastFight ? teamTable(lastFight.foe?.name ?? p.foe?.name ?? "Opponent", lastFight.members[p.theirs], {
           kos: lastFight.members[p.theirs].map((_, i) => lastFight.result.knockouts.filter((k) => k.bySide === p.theirs && k.bySlot === i).length),
           dmg: r.fights.length > 1 ? [] : damageBySlot(r, p.theirs),
@@ -201,7 +209,7 @@ async function syncHash() {
     openReplay(r, id, { onClose: () => { if (fightFromHash()) history.back(); } });
   } catch (err) {
     if (err.expired) return showExpired();
-    showBanner(err.status === 404 ? "That fight isn’t in your Battle Records anymore." : err.message, { title: "Couldn’t open the replay", key: "replay" });
+    showBanner(err.status === 404 ? "That fight isn't in your Battle Records anymore." : err.message, { title: "Couldn't open the replay", key: "replay" });
     history.replaceState(null, "", location.pathname + location.search);
   }
 }
@@ -211,6 +219,7 @@ tabs.addEventListener("click", (e) => {
   const b = e.target.closest("button[data-group]");
   if (!b) return;
   group = b.dataset.group;
+  if (group !== "" && group !== "battles") { filters.kind = ""; document.getElementById("brKind").value = ""; }
   tabs.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
   renderList();
 });
@@ -227,6 +236,17 @@ listEl.addEventListener("click", (e) => {
 
 window.addEventListener("hashchange", syncHash);
 
+// Filters: result, battle mode, opponent (the summary follows them).
+let qTimer = null;
+document.getElementById("brResult").addEventListener("change", (e) => { filters.result = e.target.value; renderList(); });
+document.getElementById("brKind").addEventListener("change", (e) => { filters.kind = e.target.value; renderList(); });
+document.getElementById("brQ").addEventListener("input", (e) => { filters.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(renderList, 150); });
+document.getElementById("brClear").addEventListener("click", () => {
+  Object.assign(filters, { result: "", kind: "", q: "" });
+  for (const k of ["brResult", "brKind", "brQ"]) document.getElementById(k).value = "";
+  renderList();
+});
+
 async function load() {
   if (!id) { statusEl.textContent = ""; return; }
   try {
@@ -234,7 +254,7 @@ async function load() {
   } catch (err) {
     statusEl.textContent = "";
     if (err.expired) return showExpired();
-    return showBanner(err.message, { title: "Couldn’t load Battle Records" });
+    return showBanner(err.message, { title: "Couldn't load Battle Records" });
   }
   renderList();
   if (fightFromHash()) syncHash();
