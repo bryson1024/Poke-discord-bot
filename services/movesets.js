@@ -27,6 +27,7 @@ import { isFullSimEnabled } from "../config/fullSim.js";
 import { getTraining } from "../utils/training.js";
 import { movesLearned } from "../utils/battle/moveset.js";
 import { moveDetails } from "../utils/battle/moveText.js";
+import { tmMove } from "../utils/battle/tmData.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
 import { copyTraining } from "./box.js";
 // fullSimCutover imports this module back; each uses the other only inside functions.
@@ -50,12 +51,16 @@ export const copyUid = (user, speciesId, variant, uid) => {
   return slotBoxUid(user, slot) ?? slotCopyUid(user, slot);
 };
 
-/** TM moves this copy learned (none for a plain copy). Unknown move ids are skipped. */
+/**
+ * TM moves this copy learned (none for a plain copy). Unknown move ids are
+ * skipped, and so are full-sim TM moves while FULL_SIM_ENABLED is off: they
+ * stay on the copy and come back when it's on again.
+ */
 export function tmMovesFor(user, speciesId, variant, { uid = null } = {}) {
   const u = copyUid(user, speciesId, variant, uid);
   const rec = u ? user.customPokemon?.[u] : null;
   if (!rec || rec.suspended) return [];
-  return rec.tmMoves.filter((m) => getMove(m));
+  return rec.tmMoves.filter((m) => getMove(m) && (tmMove(m)?.status !== "fullsim" || isFullSimEnabled()));
 }
 
 /**

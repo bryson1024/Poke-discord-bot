@@ -6,6 +6,7 @@
 
 import { assertTrue, assertEqual, section, finish } from "./harness.js";
 import { teachOptions, teachTm, laterLevelUpAt } from "../services/tmTeaching.js";
+import { learnableMoves } from "../services/movesets.js";
 import { carryCopyUids, transformCopy, plainCount, customCopiesOf, ownershipProblems } from "../services/ownership.js";
 import { runInventoryTransaction } from "../services/inventory.js";
 import { buildTeam, buildBattleTeam } from "../utils/battle/runBattle.js";
@@ -51,7 +52,7 @@ section("options");
   assertEqual([o.targets.length, t.count, Object.keys(t.teams)], [1, 3, ["display", "battle"]], "one untrained group of 3, on both teams");
   const st = Object.fromEntries(o.tms.map((x) => [x.item, x.status.untrained]));
   assertEqual([st.tm_thunderpunch, st.tm_flamethrower, st.tm_surf, st.tm_dragonclaw], ["teachable", "known", "incompatible", "known"], "Thunder Punch teachable; Flamethrower and Dragon Claw already known at Lv 50; Surf incompatible");
-  assertTrue(!o.tms.some((x) => x.item === "tm_overheat"), "held TMs are not offered");
+  assertTrue(!o.tms.some((x) => x.item === "tm_terablast"), "held TMs are not offered");
 }
 
 section("full sim: teaching a TM keeps the moves recorded at cutover (review I3)");
@@ -122,8 +123,8 @@ section("refusals keep the TM and change nothing");
   const cases = [
     ["already_known", req({ item: "tm_flamethrower" })],
     ["incompatible", req({ item: "tm_surf" })],
-    ["not_usable", req({ item: "tm_overheat" })],
-    ["unknown_tm", req({ item: "tm_solarbeam" })],
+    ["not_usable", req({ item: "tm_terablast" })],
+    ["unknown_tm", req({ item: "tm_hiddenpower" })],
     ["unknown_tm", req({ item: "evolution_stone" })],
     ["no_tm", req({ item: "tm_bodyslam" })],
     ["unowned", req({ pokeId: 150 })],
@@ -229,6 +230,29 @@ section("teach dialog warns when the move comes by level-up later");
   // A move it already knows is refused, not warned about.
   const p = player();
   assertEqual(teachOptions(p, { speciesId: 25, variant: "normal" }, { env: ON }).tms.every((t) => Object.keys(t.learnsAt).every((k) => t.status[k] === "teachable")), true, "only teachable copies carry a warning");
+}
+
+section("full-sim TMs: taught and used only while FULL_SIM_ENABLED is on");
+{
+  const FULLON = { ...ON, FULL_SIM_ENABLED: "1" };
+  const u = { cc: 0, pokemon: { 6: { normal: 1, shiny: 0 } }, training: { "6:normal": { exp: 50 ** 3 } }, items: { tm_toxic: 1 } };
+  const offOpts = teachOptions(u, { speciesId: 6, variant: "normal" }, { env: ON });
+  assertTrue(!offOpts.tms.some((x) => x.item === "tm_toxic"), "full sim off: Toxic isn't offered");
+  assertEqual(teachTm(clone(u), { item: "tm_toxic", pokeId: 6, variant: "normal", uid: null, expect: {}, equip: {} }, { env: ON }).code, "not_usable", "full sim off: teaching it is refused");
+  const onOpts = teachOptions(u, { speciesId: 6, variant: "normal" }, { env: FULLON });
+  assertEqual(onOpts.tms.find((x) => x.item === "tm_toxic")?.status.untrained, "teachable", "full sim on: Toxic is teachable");
+  const r = teachTm(u, { item: "tm_toxic", pokeId: 6, variant: "normal", uid: null, expect: {}, equip: {} }, { env: FULLON });
+  assertTrue(r.ok, "full sim on: Charizard learns Toxic");
+  const had = process.env.FULL_SIM_ENABLED;
+  try {
+    process.env.FULL_SIM_ENABLED = "1";
+    assertTrue(learnableMoves(u, 6, "normal", { uid: r.uid }).some((m) => m.id === "toxic"), "full sim on: Toxic is one of its moves");
+    delete process.env.FULL_SIM_ENABLED;
+    assertTrue(!learnableMoves(u, 6, "normal", { uid: r.uid }).some((m) => m.id === "toxic"), "full sim off: Toxic is hidden from its moves (never reaches the legacy engine)");
+    assertEqual(u.customPokemon[r.uid].tmMoves, ["toxic"], "but stays learned on the copy");
+  } finally {
+    if (had == null) delete process.env.FULL_SIM_ENABLED; else process.env.FULL_SIM_ENABLED = had;
+  }
 }
 
 finish();

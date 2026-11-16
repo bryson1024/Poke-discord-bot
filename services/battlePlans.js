@@ -50,7 +50,7 @@ function teamMembers(user, team) {
  * How the Team can get a move that helps `plan` by leveling up: the member
  * that already knows one (it just isn't in its Moveset), else the one that
  * learns one soonest. { name, move, moveName, level, known } or null.
- * Status TMs aren't sold yet (catalog/statusTmDraft.js), so only Levels count.
+ * Only Levels count here; full-sim TMs (catalog/tms.js) can also teach these moves.
  */
 function howToGet(members, plan) {
   const weather = plan.id === "weather" ? teamWeatherOf(members) : null;
