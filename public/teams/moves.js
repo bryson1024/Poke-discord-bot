@@ -56,7 +56,9 @@ async function postAbility(userId, team, s, ability) {
 }
 
 // The Ability block: Automatic + each regular ability, or the one it has.
-function abilityBlock(view, team, pick) {
+// formAbility: Black/White Kyurem's fixed ability while the slot uses that form.
+function abilityBlock(view, team, pick, formAbility = null) {
+  if (formAbility) return `<div class="tm-ability"><p class="tm-ability-head">Ability</p><p class="tm-ability-only"><b>${esc(formAbility.name)}</b> <span class="tm-sub">${esc(formAbility.desc)} ${esc(formAbility.formName)} always has this ability.</span></p></div>`;
   if (!view?.options?.length) return "";
   const t = view.teams[team];
   if (view.options.length < 2) {
@@ -76,7 +78,7 @@ async function postMoveset(userId, team, s, moves) {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: userId, team, pokeId: s.id, variant: s.variant, moves, ...(s.uid ? { uid: s.uid } : {}) }),
+    body: JSON.stringify({ id: userId, team, pokeId: s.id, variant: s.variant, moves, ...(s.uid ? { uid: s.uid } : {}), ...(s.form ? { form: s.form } : {}) }),
   });
   let body = {};
   try { body = await res.json(); } catch { /* non-JSON */ }
@@ -114,8 +116,12 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
   const own = s.uid ? line.each?.find((c) => c.uid === s.uid) : null;
   if (s.uid && !own) { dialog.close(); return toast("That Pokémon changed. Reload the page."); }
   const trained = s.uid ? line.trained?.find((t) => t.uid === s.uid) ?? null : null;
-  const copy = own ? { ...line, level: own.level, moves: own.moves, nextMoves: own.nextMoves, learnable: own.learnable, movesets: own.movesets, ability: own.ability ?? line.ability } : line;
+  const copy = own ? { ...line, level: own.level, moves: own.moves, nextMoves: own.nextMoves, learnable: own.learnable, formLearnable: own.formLearnable, movesets: own.movesets, ability: own.ability ?? line.ability } : { ...line };
   copy.learnable ??= [];
+  // Black/White Kyurem: while this slot uses a fusion form (s.form, saved or
+  // not), its own moves can be picked too (the server checks the form).
+  const formExtra = (s.form && copy.formLearnable?.[s.form]) || [];
+  if (formExtra.length) copy.learnable = [...copy.learnable, ...formExtra.filter((m) => !copy.learnable.some((x) => x.id === m.id))];
   copy.moves ??= [];
   const other = copy.movesets?.[OTHER[team]];
   // This team's moveset, else the automatic moves it battles with now. Full
@@ -124,7 +130,9 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
   let picks = startPicks(copy, team);
   const startMoves = JSON.stringify(savedMoves(picks));
   // Ability: null = Automatic. Only full-sim servers send copy.ability.
-  const abilityView = copy.ability ?? null;
+  // A fused Kyurem's ability is fixed (Teravolt / Turboblaze): no choice to make.
+  const formAbility = s.form ? line.formAbility?.[s.form] ?? null : null;
+  const abilityView = formAbility ? null : copy.ability ?? null;
   const abilityStart = abilityView?.teams?.[team]?.chosen ?? null;
   let abilityPick = abilityStart;
   const canChooseAbility = (abilityView?.options?.length ?? 0) > 1;
@@ -155,11 +163,11 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
       <ul class="tm-movelist" aria-label="Learned moves">
         ${copy.learnable.map((m) => moveRow(m, {
           on: ticked.includes(m.id), full, recommended: rec.includes(m.id),
-          meta: moveMeta(m, { extra: [m.source === "tm" ? "TM" : m.learnedAt ? `Lv ${m.learnedAt}` : "", isStab(m) ? "STAB ×1.5" : ""] }),
+          meta: moveMeta(m, { extra: [m.source === "tm" ? "TM" : m.source === "form" ? `${m.formName} · Lv ${m.learnedAt}` : m.learnedAt ? `Lv ${m.learnedAt}` : "", isStab(m) ? "STAB ×1.5" : ""] }),
           details: moveDescLine(m),
         })).join("")}
       </ul>
-      ${abilityBlock(abilityView, team, abilityPick)}
+      ${abilityBlock(abilityView, team, abilityPick, formAbility)}
       <p class="tm-sub tm-moves-note">${copy.nextMoves?.length ? `Learns next: ${copy.nextMoves.map((m) => esc(m.name)).join(", ")}. ` : ""}${trained ? `★ Trained copy: ${trained.tmMoves.map((m) => esc(m.name)).join(", ")} learned from TMs.` : ""}</p>
       <div class="tm-moves-actions"><button type="button" class="cc-btn" data-close>Cancel</button><button type="button" class="cc-btn cc-btn--primary" data-save${canSave(picks) ? "" : " disabled"}>${canChooseAbility ? "Save" : "Save moves"}</button></div>`;
   };

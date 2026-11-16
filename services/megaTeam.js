@@ -33,6 +33,8 @@ import { getMega, megaFormGate, megaBattleEligibility, megaBattleProfile, MEGA_I
 import { unlockedForms, megaLineKey } from "./megaUnlocks.js";
 import { isMegaCapabilityEnabled } from "../config/features.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
+import { fusionFieldOf } from "../utils/fusions.js";
+import { storedFusion, hasFormKey, fusionSelectionError } from "./fusionTeam.js";
 
 const fail = (status, error, code) => ({ ok: false, status, error, code });
 
@@ -70,7 +72,10 @@ export function normalizeDisplayedTeam(user) {
       const mega = megaFieldOf(t);
       // Any copy of the line (docs/adr/0001); trained copies are copies too.
       const uid = slotBoxUid(user, { ...slot, uid: t?.uid }) ?? slotCopyUid(user, { ...slot, uid: t?.uid });
-      const out = mega && Number.isInteger(slot.id) && megaFitsSlot(user, slot, mega) ? { ...slot, mega } : slot;
+      let out = mega && Number.isInteger(slot.id) && megaFitsSlot(user, slot, mega) ? { ...slot, mega } : slot;
+      // Black/White Kyurem (utils/fusions.js): kept while still unlocked.
+      const form = storedFusion(user, slot, t, "Casual");
+      if (form) out = { ...out, form };
       return uid ? { ...out, uid } : out;
     })
     .filter((t) => Number.isInteger(t.id))
@@ -116,8 +121,16 @@ export function prepareTeamSelection(user, rawTeam, { env = process.env } = {}) 
       if (!uid) return fail(400, "That Pokémon copy no longer exists. Reload and try again.", "unknown_copy");
       out = { ...out, uid };
     }
+    // Black/White Kyurem: a well-formed form id, checked below.
+    if (hasFormKey(entry)) {
+      const form = fusionFieldOf(entry);
+      if (!form) return fail(400, "Invalid form.", "bad_form");
+      out = { ...out, form };
+    }
     parsed.push(out);
   }
+  const fusionError = fusionSelectionError(user, parsed, { env });
+  if (fusionError) return fusionError;
 
   const megaSlots = parsed.filter((s) => s.mega);
   if (megaSlots.length) {

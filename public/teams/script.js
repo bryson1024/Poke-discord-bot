@@ -48,7 +48,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const keyOf = (s) => `${s.id}:${s.variant}`;
 // A stored slot as the page keeps it. `uid` names a trained copy (TM system);
 // it must survive every edit, or saving would drop the copy from its slot.
-const slotFromServer = (s) => ({ id: Number(s.id), variant: s.variant === "shiny" ? "shiny" : "normal", ...(s.mega ? { mega: s.mega } : {}), ...(s.uid ? { uid: s.uid } : {}) });
+const slotFromServer = (s) => ({ id: Number(s.id), variant: s.variant === "shiny" ? "shiny" : "normal", ...(s.mega ? { mega: s.mega } : {}), ...(/^kyurem-(black|white)$/.test(s.form ?? "") ? { form: s.form } : {}), ...(s.uid ? { uid: s.uid } : {}) });
 const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
@@ -71,6 +71,7 @@ const state = {
   trained: {},           // "6:normal" → [trained copies] (TM system)
   megaOn: false,
   megaCards: [], // GET /api/mega cards (only while Mega Evolution is on)
+  fusion: { enabled: false, forms: [] }, // Black/White Kyurem (GET /api/user-pokemon `fusion`)
   saved: { showcase: [], display: [], battle: null },
   copies: [],            // [[uid, id, shiny, level, caughtAt, trained, teams]] (docs/adr/0001)
   notices: [],           // one-time Battle team notices (GET /api/user-pokemon)
@@ -111,14 +112,33 @@ const isTrainedCopy = (s) => !!(s.uid && state.copies.find((r) => r[0] === s.uid
 const levelOf = (s) => (s.uid && state.copies.find((r) => r[0] === s.uid)?.[3]) ?? state.levels[keyOf(s)] ?? "?";
 const powerOf = (s) => state.powers[keyOf(s)] ?? 0;
 /** Power at Lv 50, the Level Ranked battles use: the Mega form's when the slot uses one. */
-const power50Of = (s) => (s.mega && state.megaOn ? megaCard(s.mega)?.power50 : null) ?? state.powers50[s.id] ?? 0;
+const power50Of = (s) => (fusionOf(s)?.power50 ?? null) ?? (s.mega && state.megaOn ? megaCard(s.mega)?.power50 : null) ?? state.powers50[s.id] ?? 0;
+// ---------- Black/White Kyurem (utils/fusions.js) ----------
+const KYUREM = 646;
+const FUSION_EXCLUSIVE = new Set([643, 644, KYUREM]); // Reshiram, Zekrom, Kyurem
+/** The slot's fusion form while fusion is on, else null. */
+const fusionOf = (s) => (s?.form && state.fusion.enabled ? state.fusion.forms.find((f) => f.id === s.form) ?? null : null);
+/** Fusion forms this Kyurem copy can use (Kyurem + the partner owned). */
+const fusionFormsFor = (s) => (Number(s.id) === KYUREM && state.fusion.enabled ? state.fusion.forms.filter((f) => f.unlocked?.[s.variant]) : []);
+/** Team rule (Casual and Ranked): the reason `s` can't join `list` beside a fused Kyurem, or null. */
+function fusionClash(list, s) {
+  if (!state.fusion.enabled) return null;
+  const fused = list.find((m) => fusionOf(m));
+  if (fusionOf(s)) {
+    const other = list.find((m) => FUSION_EXCLUSIVE.has(Number(m.id)));
+    return other ? `${fusionOf(s).name} can't be on a team with ${slotName(other)}.` : null;
+  }
+  return fused && FUSION_EXCLUSIVE.has(Number(s.id)) ? `${species(s.id).name} can't join a team with ${fusionOf(fused).name}.` : null;
+}
 const fmt = (n) => Number(n).toLocaleString("en-US");
 const megaCard = (formId) => state.megaCards.find((c) => c.formId === formId);
-const slotName = (s) => (s.mega && state.megaOn ? megaCard(s.mega)?.name ?? megaName(s) : species(s.id).name);
+const slotName = (s) => fusionOf(s)?.name ?? (s.mega && state.megaOn ? megaCard(s.mega)?.name ?? megaName(s) : species(s.id).name);
 /** Mega forms this exact copy can use on a team (unlocked on its line, allowed for teams). */
 const megaFormsFor = (s) => state.megaCards.filter((c) => c.line === `${s.id}:${s.variant}` && c.teamSelectable);
 const megaName = (s) => `Mega ${species(s.id).name}${/-([xy])$/.test(s.mega) ? ` ${s.mega.slice(-1).toUpperCase()}` : ""}`;
 function spriteOf(s) {
+  const fusion = fusionOf(s);
+  if (fusion) return `/public/sprites/pokemon/${s.variant === "shiny" ? "shiny" : "normal"}/${fusion.spriteId}.gif`;
   if (s.mega && state.megaOn) return `/public/sprites/pokemon/mega/${s.variant}/${s.mega}.gif`;
   return `/public/sprites/pokemon/${s.variant === "shiny" ? "shiny" : "normal"}/${s.id}.gif`;
 }
@@ -203,6 +223,8 @@ function blockReason(t, s, { replaceAt = -1 } = {}) {
   // Casual and Ranked hold each Pokémon once (only the Showcase takes repeats).
   if (list.some((m) => m.id === s.id && m.variant === s.variant)) return { code: "on", short: "On this team", text: `${species(s.id).name} is already on your ${LABEL[t]}.` };
   if (list.length >= MAX) return { code: "full", short: "Team full", text: `Your ${LABEL[t]} is full (6/6). Remove a Pokémon first.` };
+  const clash = fusionClash(list, s);
+  if (clash) return { code: "fusion", short: "Kyurem rule", title: "Black or White Kyurem is on this team", text: `${clash} A team with Black or White Kyurem can't also have Kyurem, Zekrom or Reshiram.` };
   if (t === "battle" && isMythic(s.id)) {
     const other = list.find((m) => isMythic(m.id));
     if (other) {
@@ -333,6 +355,33 @@ function cycleMega(t, i) {
   render();
 }
 
+/**
+ * Kyurem's Form button: cycles Kyurem → each unlocked fusion form. On Casual
+ * and Ranked a fused Kyurem can't share the team with Kyurem, Zekrom or
+ * Reshiram: those forms are skipped, with a note (the server checks too).
+ */
+function cycleFusion(t, i) {
+  const list = team(t).map((s) => ({ ...s }));
+  const s = list[i];
+  if (!s) return;
+  const options = [null, ...fusionFormsFor(s).map((f) => f.id)];
+  const others = list.filter((_, k) => k !== i);
+  let next = options[(options.indexOf(s.form ?? null) + 1) % options.length];
+  if (next && !isShowcase(t)) {
+    const clash = fusionClash(others, { ...s, form: next });
+    if (clash) {
+      toast(`${clash} Remove Kyurem, Zekrom and Reshiram from this team first.`);
+      next = null;
+    }
+  }
+  if (next) s.form = next;
+  else delete s.form;
+  state.draft[t] = list;
+  announce(next ? `Kyurem ${isShowcase(t) ? "shows" : "will battle"} as ${fusionOf(s)?.name ?? next}.` : `Kyurem ${isShowcase(t) ? "shows" : "will battle"} as Kyurem.`);
+  focusAfter = `[data-act="fusion"][data-team="${t}"][data-i="${i}"]`;
+  render();
+}
+
 // The teams a team can copy from (the other two).
 const SOURCES = { showcase: ["display", "battle"], display: ["battle", "showcase"], battle: ["display", "showcase"] };
 
@@ -356,6 +405,8 @@ async function copyFrom(target, source = SOURCES[target].find((t) => team(t).len
       if (lines.has(keyOf(s))) { dropped.push({ s, why: "already on the team" }); continue; }
       if (target === "battle" && isMythic(s.id) && mythics++ >= 1) { dropped.push({ s, why: "one mythic-tier Pokémon per Ranked team" }); continue; }
       if (s.mega && megas++ >= 1) delete s.mega; // one Mega per team: the rest come as their base form
+      if (s.form && fusionClash(kept, s)) delete s.form; // Black/White Kyurem beside Kyurem, Zekrom or Reshiram: plain Kyurem
+      if (!s.form && fusionClash(kept, s)) { const f = kept.find((m) => fusionOf(m)); if (f) delete f.form; }
       lines.add(keyOf(s)); // each Pokémon once on Casual and Ranked
     }
     kept.push(s);
@@ -459,9 +510,11 @@ function copyPayload(t) {
 }
 
 /** Hide the Battle team notices and tell the server they were seen. */
+// Ranked-team notices show on the Ranked tab; Black/White Kyurem ones on every tab.
+const noticesFor = (t) => state.notices.filter((n) => n.kind === "fusion_revert" || t === "battle");
 async function dismissNotices() {
-  const ids = state.notices.map((n) => n.id);
-  state.notices = [];
+  const ids = noticesFor(state.active).map((n) => n.id);
+  state.notices = state.notices.filter((n) => !ids.includes(n.id));
   render();
   try {
     const res = await fetch("/api/dismiss-notices", {
@@ -493,6 +546,7 @@ function slotCard(t, s, i) {
   const tags = [
     i === 0 && !sc ? `<span class="tm-tag tm-tag--lead">Lead</span>` : "",
     s.mega && state.megaOn ? `<span class="tm-tag tm-tag--mega">Mega</span>` : "",
+    fusionOf(s) ? `<span class="tm-tag tm-tag--fusion" title="Kyurem fused with ${esc(fusionOf(s).partnerName)}">Fusion</span>` : "",
     isMythic(s.id) ? `<span class="cc-tier" data-tier="mythic">Mythic</span>` : "",
     change ? `<span class="tm-tag tm-tag--change">${change}</span>` : "",
     isTrainedCopy(s) ? `<span class="tm-tag tm-tag--trained" title="This copy learned moves from TMs">★ Trained</span>` : "",
@@ -516,6 +570,7 @@ function slotCard(t, s, i) {
       ${copies > 1 ? `<button type="button" class="tm-movesbtn" data-act="pickcopy" data-team="${t}" data-i="${i}" aria-label="Change which ${esc(species(s.id).name)} is in this slot (you have ${copies})">Change copy</button>` : ""}
       ${ic.button}
       ${state.megaOn && megaFormsFor(s).length ? `<button type="button" class="tm-megabtn${s.mega ? " is-on" : ""}" data-act="mega" data-team="${t}" data-i="${i}" aria-label="Mega form for ${esc(species(s.id).name)}: ${s.mega ? esc(megaCard(s.mega)?.name ?? s.mega) : "off"}. Change">${s.mega ? `Mega: ${esc((megaCard(s.mega)?.name ?? s.mega).replace(/^Mega /, ""))}` : "Mega: off"}</button>` : ""}
+      ${fusionFormsFor(s).length ? `<button type="button" class="tm-megabtn tm-fusionbtn${fusionOf(s) ? " is-on" : ""}" data-act="fusion" data-team="${t}" data-i="${i}" aria-label="Form for Kyurem: ${fusionOf(s) ? esc(fusionOf(s).name) : "Kyurem"}. Change">Form: ${fusionOf(s) ? esc(fusionOf(s).shortName) : "Kyurem"}</button>` : ""}
     </div>
     <div class="tm-slot-ctl">
       <span class="tm-grip" title="Drag to reorder"><svg class="tm-ic" aria-hidden="true"><use href="#tm-grip"/></svg></span>
@@ -561,7 +616,7 @@ let checkTimer = null;
 function scheduleCheck() {
   const t = state.active;
   if (isShowcase(t) || !team(t).length) return;
-  const slots = team(t).map((s) => ({ id: s.id, variant: s.variant, ...(s.mega && state.megaOn ? { mega: s.mega } : {}), ...(s.uid ? { uid: s.uid } : {}) }));
+  const slots = team(t).map((s) => ({ id: s.id, variant: s.variant, ...(s.mega && state.megaOn ? { mega: s.mega } : {}), ...(fusionOf(s) ? { form: s.form } : {}), ...(s.uid ? { uid: s.uid } : {}) }));
   const key = JSON.stringify([t, slots]);
   if (key === state.check.key) return;
   state.check = { ...state.check, key, data: null, failed: false };
@@ -617,8 +672,9 @@ function teamPanel() {
   } else {
     body = `<ol class="tm-slots">${Array.from({ length: MAX }, (_, i) => slotCard(t, list[i] ?? null, i)).join("")}</ol>`;
   }
-  const note = isB && state.notices.length
-    ? `<div class="tm-notice" role="status"><p>${state.notices.map((n) => esc(n.text)).join("<br>")}</p><button type="button" class="cc-btn" data-act="dismiss">Got it</button></div>`
+  const shownNotices = noticesFor(t);
+  const note = shownNotices.length
+    ? `<div class="tm-notice" role="status"><p>${shownNotices.map((n) => esc(n.text)).join("<br>")}</p><button type="button" class="cc-btn" data-act="dismiss">Got it</button></div>`
     : "";
   const e = state.error[t];
   const err = e ? `<div class="tm-error" role="alert"><svg class="tm-ic" aria-hidden="true"><use href="#tm-lock"/></svg><p><strong>${esc(e.title ?? "Can't add that Pokémon")}</strong>${esc(e.text)}</p></div>` : "";
@@ -743,6 +799,9 @@ function saveBar() {
     const bits = [];
     if (added.length) bits.push(`added ${added.join(", ")}`);
     if (removed.length) bits.push(`removed ${removed.join(", ")}`);
+    // A Mega or Black/White Kyurem form switched on a Pokémon already on the team.
+    const reformed = b.filter((s) => { const m = a.find((x) => keyOf(x) === keyOf(s)); return m && ((m.form ?? null) !== (s.form ?? null) || (m.mega ?? null) !== (s.mega ?? null)); });
+    if (reformed.length) bits.push(`new form for ${reformed.map((s) => species(s.id).name).join(", ")}`);
     if (!bits.length) bits.push("new order");
     return `${LABEL[t]}: ${bits.join(" · ")}`;
   });
@@ -802,6 +861,7 @@ function onClick(e) {
   else if (act === "details") openTeamDetails(t, i);
   else if (act === "details-box") openBoxDetails({ id: Number(el.dataset.id), variant: el.dataset.variant });
   else if (act === "mega") cycleMega(t, i);
+  else if (act === "fusion") cycleFusion(t, i);
   else if (act === "pickcopy") {
     const s = team(t)[i];
     if (s) {
@@ -836,7 +896,7 @@ function onClick(e) {
   }
   else if (act === "moves") {
     const s = team(t)[i];
-    if (s) openMovesEditor({ userId, team: t, s, name: species(s.id).name, recommended: recommendedFor(state.plans, t, s), onSaved: () => refreshPlans(), onTaught: () => { refreshCopies(); refreshPlans(); } });
+    if (s) openMovesEditor({ userId, team: t, s: fusionOf(s) ? s : { ...s, form: undefined }, name: slotName(s), recommended: recommendedFor(state.plans, t, s), onSaved: () => refreshPlans(), onTaught: () => { refreshCopies(); refreshPlans(); } });
   }
   else if (act === "discard") discard();
   else if (act === "save") save();
@@ -1082,7 +1142,7 @@ function openTeamDetails(t, i) {
     onAction: (act, d, variant) => {
       // The slot's own copy (TM system): its trained copy when the variant matches the slot.
       if (act === "moves") {
-        const slot = { id: d.id, variant, ...(variant === s.variant && s.uid ? { uid: s.uid } : {}) };
+        const slot = { id: d.id, variant, ...(variant === s.variant && s.uid ? { uid: s.uid } : {}), ...(variant === s.variant && fusionOf(s) ? { form: s.form } : {}) };
         openMovesEditor({ userId, team: t, s: slot, name: species(d.id).name, recommended: recommendedFor(state.plans, t, slot), onSaved: () => refreshPlans(), onTaught: () => { refreshCopies(); refreshPlans(); } });
       }
       else if (act === "collection") leaveTo(collectionHref(d.id, variant, variant === s.variant ? s.uid : null));
@@ -1145,13 +1205,14 @@ async function load() {
     state.copies = Array.isArray(u.copies) ? u.copies : [];
     const norm = (list) => (Array.isArray(list) ? list.map(slotFromServer) : null);
     state.saved = { showcase: norm(u.showcaseTeam) ?? [], display: norm(u.currentTeam) ?? [], battle: norm(u.battleTeam) };
-    state.notices = Array.isArray(u.notices) ? u.notices.filter((n) => n.kind === "battle_team_trim") : [];
+    state.notices = Array.isArray(u.notices) ? u.notices.filter((n) => n.kind === "battle_team_trim" || n.kind === "fusion_revert") : [];
+    state.fusion = u.fusion?.enabled && Array.isArray(u.fusion.forms) ? u.fusion : { enabled: false, forms: [] };
     state.draft = clone(state.saved);
     const want = new URLSearchParams(location.search).get("team");
     const kept = view.get();
     state.filter = { q: kept.q, show: ["all", "shiny", "free"].includes(kept.show) ? kept.show : "all", sort: ["power", "level", "dex", "name"].includes(kept.sort) ? kept.sort : "power" };
     // The link's ?team= first, then a notice about the Ranked team, then the last team viewed.
-    state.active = TEAMS.includes(want) ? want : state.notices.length ? "battle" : TEAMS.includes(kept.active) ? kept.active : "display";
+    state.active = TEAMS.includes(want) ? want : state.notices.some((n) => n.kind === "battle_team_trim") ? "battle" : TEAMS.includes(kept.active) ? kept.active : "display";
   } catch (err) {
     app.innerHTML = "";
     showBanner(err?.message || "Couldn't load your teams. Please try again.", { title: "Couldn't load your teams" });

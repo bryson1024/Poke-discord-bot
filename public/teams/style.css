@@ -421,3 +421,8 @@ button.tm-stage:focus-visible { outline: 2px solid var(--cc-blue); outline-offse
 .tm-check-table td.is-resist { color: var(--cc-green, #5fd38a); font-weight: 800; }
 .tm-check-table td.is-zero { color: var(--cc-text-muted); opacity: .5; }
 .tm-check-types { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 14px 6px; }
+
+/* Black/White Kyurem (utils/fusions.js): the Form button and Fusion tag, in ice blue. */
+.tm-tag--fusion { background: #7dd3fc; color: var(--cc-ink); }
+.tm-fusionbtn { border-color: #7dd3fc88; }
+.tm-fusionbtn.is-on { border-color: #7dd3fc; background: #7dd3fc26; }

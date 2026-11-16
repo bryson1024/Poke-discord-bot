@@ -81,6 +81,9 @@ export const ABILITY_REGISTRY = Object.freeze({
     ignoresGhostImmunity: ["Normal", "Fighting"],
   },
   "Mold Breaker": { status: "implemented", source: SHOWDOWN, moldBreaker: true, onEntry: (c) => c.note(`${c.self.name} breaks the mold!`) },
+  // Black/White Kyurem (utils/fusions.js): Mold Breaker with their own entry message.
+  "Teravolt": { status: "implemented", source: SHOWDOWN, moldBreaker: true, onEntry: (c) => c.note(`${c.self.name} is radiating a bursting aura!`) },
+  "Turboblaze": { status: "implemented", source: SHOWDOWN, moldBreaker: true, onEntry: (c) => c.note(`${c.self.name} is radiating a blazing aura!`) },
   "Protean": {
     status: "implemented", source: SHOWDOWN, note: "Gen 9: once per entry.",
     onBeforeMove: (c) => {

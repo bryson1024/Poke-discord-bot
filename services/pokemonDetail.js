@@ -20,11 +20,18 @@ import { megasOfSpecies, megaBattleEligibility } from "../utils/megas.js";
 import { unlockedForms, megaLineKey } from "./megaUnlocks.js";
 import { isMegaCapabilityEnabled } from "../config/features.js";
 import { toTeamObj } from "../utils/economyRules.js";
-import { learnableMoves, chosenMoves, moveInfo as movesetMoveInfo } from "./movesets.js";
+import { learnableMoves, chosenMoves, formMoves, moveInfo as movesetMoveInfo } from "./movesets.js";
+import { fusionsOfSpecies } from "../utils/fusions.js";
+
+// Black/White Kyurem: each unlocked form's own moves at this Level, for the
+// Teams moves editor (shown while the slot uses that form). {} for other species.
+const formLearnableAt = (user, id, variant, level) => Object.fromEntries(fusionsOfSpecies(id)
+  .map((f) => [f.id, formMoves(user, id, variant, f.id, level).map((m) => ({ ...movesetMoveInfo(m.id), learnedAt: m.learnedAt, source: "form", form: f.id, formName: f.name }))])
+  .filter(([, list]) => list.length));
 import { customCopiesOf, plainCount } from "./ownership.js";
 import { isTmEnabled } from "../config/tmFeatures.js";
 import { copiesOf } from "./box.js";
-import { abilityView } from "./abilities.js";
+import { abilityView, abilityInfo } from "./abilities.js";
 import { tmMovesForSpecies } from "../utils/battle/tmData.js";
 
 const sum = (s) => (s ? s.hp + s.atk + s.def + s.spa + s.spd + s.spe : null);
@@ -128,6 +135,9 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
         battle: chosenMoves(user, "battle", id, variant)?.map(movesetMoveInfo) ?? null,
       },
       learnable: species ? learnableMoves(user, id, variant, { level }).map((m) => ({ ...movesetMoveInfo(m.id), learnedAt: m.learnedAt, source: m.source })) : [],
+      formLearnable: formLearnableAt(user, id, variant, level),
+      // Black/White Kyurem: each form's fixed ability (Teravolt / Turboblaze), shown while the slot uses it.
+      formAbility: Object.fromEntries(fusionsOfSpecies(id).map((f) => [f.id, { ...abilityInfo(f.ability), formName: f.name }])),
       // Full sim: its regular abilities and, per team, the choice (null = Automatic) and Automatic's pick.
       ability: abilityView(user, id, variant, { env }),
       nextMoves: species ? movesLearned(id, level, Math.min(100, level + 20)).map(moveInfo) : [],
@@ -153,6 +163,7 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
         moves: defaultMoves(user, { id, variant, uid: c.uid }, c.level).map(moveInfo),
         nextMoves: movesLearned(id, c.level, Math.min(100, c.level + 20)).map(moveInfo),
         learnable: learnableMoves(user, id, variant, { uid: c.uid }).map((m) => ({ ...movesetMoveInfo(m.id), learnedAt: m.learnedAt, source: m.source })),
+        formLearnable: formLearnableAt(user, id, variant, c.level),
         movesets: {
           display: chosenMoves(user, "display", id, variant, { uid: c.uid })?.map(movesetMoveInfo) ?? null,
           battle: chosenMoves(user, "battle", id, variant, { uid: c.uid })?.map(movesetMoveInfo) ?? null,

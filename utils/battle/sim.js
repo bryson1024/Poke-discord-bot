@@ -59,7 +59,7 @@ export function buildMon(member, levelMult = 1, statMult = 1, env = process.env)
       : member.hpFraction <= 0 ? 0
       : Math.max(1, Math.round(maxHp * member.hpFraction)),
     moves: memberMoves(member, env).map((id) => getMove(id, env)),
-    ...(profile && { ability: profile.ability, megaForm: profile.formId, name: profile.name }),
+    ...(profile && { ability: profile.ability, name: profile.name, ...(profile.kind === "fusion" ? { fusionForm: profile.formId } : { megaForm: profile.formId }) }),
     // Held item (validated in runBattle.buildTeam). Absent for members
     // without one, so their battler is exactly as before.
     ...(member.item && { item: member.item }),

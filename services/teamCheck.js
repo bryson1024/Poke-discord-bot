@@ -39,6 +39,7 @@ function cleanSlots(raw) {
     const slot = { id, variant };
     if (typeof s.mega === "string" && /^[a-z0-9-]{1,64}$/.test(s.mega)) slot.mega = s.mega;
     if (typeof s.uid === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(s.uid)) slot.uid = s.uid;
+    if (typeof s.form === "string" && /^kyurem-(black|white)$/.test(s.form)) slot.form = s.form; // Black/White Kyurem (buildTeam re-checks)
     out.push(slot);
   }
   return out;

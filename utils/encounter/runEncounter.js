@@ -65,7 +65,7 @@ export function fightEncounter({ trainerData, userId, encounter: { team, trainer
   // the Mega slot as a Mega only if it still qualifies (buildTeam re-checks).
   // Ranked (three-teams split): the Ranked team's moves and held items, still at real Levels.
   const side = pick === "ranked" ? { movesetTeam: "battle", equipmentTeam: "battle" } : {};
-  const members = buildTeam(user, { ...side, team: team.map((m) => ({ id: m.speciesId, variant: m.variant, ...(m.copyUid && { uid: m.copyUid }), ...(m.megaForm && { mega: m.megaForm }) })) });
+  const members = buildTeam(user, { ...side, team: team.map((m) => ({ id: m.speciesId, variant: m.variant, ...(m.copyUid && { uid: m.copyUid }), ...(m.megaForm && { mega: m.megaForm }), ...(m.fusionForm && { form: m.fusionForm }) })) });
   if (!members.length) return { ok: false, reason: "no_team" };
 
   // Full sim: the Trainer class's plan (catalog/opponentPlans.js) picks the party's moves and how it plays.

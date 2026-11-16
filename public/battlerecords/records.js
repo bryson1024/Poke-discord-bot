@@ -20,7 +20,7 @@ export const SUMMARY_WINDOW = 20;
 
 export const pokemonSprite = (m) => (m.megaForm
   ? `/public/sprites/pokemon/mega/${m.variant === "shiny" ? "shiny" : "normal"}/${m.megaForm}.gif`
-  : `/public/sprites/pokemon/${m.variant === "shiny" ? "shiny" : "normal"}/${m.speciesId}.gif`);
+  : `/public/sprites/pokemon/${m.variant === "shiny" ? "shiny" : "normal"}/${m.speciesId}${/^kyurem-(black|white)$/.test(m.fusionForm ?? "") ? `-${m.fusionForm.slice(7)}` : ""}.gif`); // Black/White Kyurem: 646-black.gif
 export const trainerSprite = (file) => (file ? `/public/sprites/trainers_2/${file}` : "/public/sprites/items/pokeball.png");
 export const itemLabel = (id) => String(id ?? "").replace(/^item_/, "").split(/[_-]/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
 
@@ -72,7 +72,7 @@ export function perspective(record, me) {
   };
 }
 
-const monKey = (m) => `${m.speciesId}:${m.variant}:${m.megaForm ?? ""}`;
+const monKey = (m) => `${m.speciesId}:${m.variant}:${m.megaForm ?? m.fusionForm ?? ""}`;
 
 /** The summary over the newest `n` records shown. */
 export function summarize(records, me, n = SUMMARY_WINDOW) {

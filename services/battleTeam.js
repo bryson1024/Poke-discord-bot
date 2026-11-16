@@ -24,6 +24,7 @@
 import { toTeamObj, normVariant } from "../utils/economyRules.js";
 import { getSpeciesEntry } from "../utils/speciesCatalog.js";
 import { megaFieldOf, megaFitsSlot, prepareTeamSelection } from "./megaTeam.js";
+import { storedFusion } from "./fusionTeam.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
 import { addNotice, NOTICE_KINDS } from "./notices.js";
 
@@ -40,7 +41,7 @@ export const hasBattleTeam = (user) => Array.isArray(user?.battleTeam);
  * Display team: legacy numbers → objects, variant normalized, a valid Mega
  * kept, slots whose exact variant isn't owned removed. Returns a new array.
  */
-export function cleanStoredTeam(user, raw) {
+export function cleanStoredTeam(user, raw, teamLabel = "Ranked") {
   let team = Array.isArray(raw) ? raw : [];
   if (team.length && typeof team[0] !== "object") {
     team = team.map((pid) => ({ id: Number(pid), variant: "normal" })).filter((t) => Number.isInteger(t.id));
@@ -50,7 +51,9 @@ export function cleanStoredTeam(user, raw) {
       const slot = { id: Number(t?.id), variant: t?.variant === "shiny" ? "shiny" : "normal" };
       const mega = megaFieldOf(t);
       const uid = slotBoxUid(user, { ...slot, uid: t?.uid }) ?? slotCopyUid(user, { ...slot, uid: t?.uid }); // the slot's copy (docs/adr/0001)
-      const out = mega && Number.isInteger(slot.id) && megaFitsSlot(user, slot, mega) ? { ...slot, mega } : slot;
+      let out = mega && Number.isInteger(slot.id) && megaFitsSlot(user, slot, mega) ? { ...slot, mega } : slot;
+      const form = storedFusion(user, slot, t, teamLabel); // Black/White Kyurem, while unlocked
+      if (form) out = { ...out, form };
       return uid ? { ...out, uid } : out;
     })
     .filter((t) => Number.isInteger(t.id))
