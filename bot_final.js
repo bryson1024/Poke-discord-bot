@@ -547,7 +547,7 @@ app.get("/auth/admin", (req, res) => {
     maxAge: ADMIN_MAX_MS,
   });
 
-  res.redirect("/public/admindashboard");
+  res.redirect("/public/admindashboard/");
 });
 
 // ==========================================================

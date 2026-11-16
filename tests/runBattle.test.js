@@ -5,8 +5,8 @@
 
 import { assertEqual, assertTrue, section, finish } from "./harness.js";
 import { buildTeam, buildBattleTeam, runBattle, battleBlock, withBothLocks } from "../utils/battle/runBattle.js";
-import { RANKED, PLAYBACK, FULL_SIM } from "../utils/battle/tuning.js";
-import { rankedRecord, lifetimeRanked, getBattleRecord, utcDay } from "../utils/battle/rewards.js";
+import { RANKED, PLAYBACK, FULL_SIM, CAPS, DEFENDER_EXP_MULT } from "../utils/battle/tuning.js";
+import { rankedRecord, lifetimeRanked, getBattleRecord, utcDay, teamExp } from "../utils/battle/rewards.js";
 import { blockRematch, isRematchBlocked } from "../utils/battle/rematch.js";
 import { battleImageName, buildResultEmbed, createQueue, expSummary, playBattle, resultScreens } from "../utils/battle/playback.js";
 import { pickFrameTurns } from "../utils/battle/render.js";
@@ -55,8 +55,10 @@ section("Casual (open) battle: Display teams, real Levels, unrated");
   assertTrue(out.ok, "battle runs");
   assertTrue(out.result.knockouts.some((k) => k.bySide === 0), "Challenger scores a knockout (fixture precondition)");
   assertTrue(JSON.stringify(td.A.training) !== before.a, "Challenger's Team gains EXP");
-  assertEqual(JSON.stringify(td.B.training), before.b, "Defender's training is unchanged");
+  assertTrue(out.result.knockouts.some((k) => k.bySide === 1), "Defender scores a knockout (fixture precondition)");
+  assertTrue(JSON.stringify(td.B.training) !== before.b, "Defender's Team gains EXP too");
   assertEqual([td.A.battle.started, td.B.battle.started], [1, 0], "only the Challenger uses a battle");
+  assertEqual(td.B.battle.defended, 1, "the Defender's battle counts toward their EXP-earning defences");
   assertEqual([rankedRecord(td.A).rating, rankedRecord(td.B).rating], [1000, 1000], "ratings don't move");
   assertEqual(rankedRecord(td.A).wins + rankedRecord(td.A).losses, 0, "no ranked W/L");
   assertEqual(td[out.winnerId].casual.wins + td[out.loserId].casual.losses, 2, "casual W/L recorded for both");
@@ -66,7 +68,7 @@ section("Casual (open) battle: Display teams, real Levels, unrated");
   assertEqual(out.rated, false, "outcome says unrated");
   assertEqual(out.rating, {}, "no rating changes");
   assertTrue(out.sides[0].members.every((m) => m.realLevel == null), "real Levels (no Lv 50)");
-  assertEqual(Object.keys(out.exp), ["A"], "EXP report covers the Challenger only");
+  assertEqual(Object.keys(out.exp).sort(), ["A", "B"], "EXP report covers both players");
   assertTrue(out.exp.A.every((e) => e.toLevel >= e.fromLevel && Array.isArray(e.learned)), "EXP report has Level changes and learned moves");
   assertEqual(out.sides.map((s) => s.members.length), [3, 2], "both Teams fought");
 }
@@ -99,6 +101,7 @@ section("Ranked battle: Battle teams at Lv 50, rated, no surge");
   assertTrue(!td.A.casual && !td.B.casual, "no casual record written");
   assertTrue(JSON.stringify(td.A.training) !== before, "Challenger still earns EXP");
   assertEqual(out.exp.A[0].fromLevel, out.sides[0].members[0].realLevel, "EXP is applied at the real Level, not Lv 50");
+  assertEqual(out.exp.B?.length, FULL_B.length, "the Defender's Ranked team earns EXP too");
   const noBT = world();
   delete noBT.B.battleTeam;
   assertEqual(ranked(noBT).reason, "no_battle_team_defender", "a Defender without a Battle team can't be challenged to ranked");
@@ -195,6 +198,43 @@ section("Refusals and caps");
     "defender_cap_daily", "a Defender out of battles can't take a wager");
 }
 
+section("Defender EXP: half in casual and ranked, full in wagers");
+{
+  // What a side's formula pays before any share (no held items or events here).
+  const full = (out, i) => teamExp({
+    members: out.sides[i].members.map((m) => (m.realLevel != null ? { ...m, level: m.realLevel } : m)),
+    knockedOut: out.result.knockouts.filter((k) => k.bySide === i).map((k) => out.sides[1 - i].members[k.slot]).map((m) => (m.realLevel != null ? { ...m, level: m.realLevel } : m)),
+    won: out.result.winner === i,
+  });
+  assertEqual(DEFENDER_EXP_MULT, 0.5, "the Defender's share is half");
+  for (const [label, run] of [["casual", open], ["ranked", ranked]]) {
+    const out = run(world(), 40);
+    assertTrue(full(out, 1).some((g) => g > 0), `${label}: Defender scores EXP (fixture precondition)`);
+    assertEqual(out.exp.B.map((e) => e.gained), full(out, 1).map((g) => Math.floor(g * 0.5)), `${label}: the Defender gets half`);
+    assertEqual(out.exp.A.map((e) => e.gained), full(out, 0), `${label}: the Challenger still gets it all`);
+  }
+  const w = runBattle({ trainerData: world(), challengerId: "A", defenderId: "B", mode: "wager", stake: 1, seed: 40, now: NOW });
+  assertEqual(w.exp.B.map((e) => e.gained), full(w, 1), "wager: the Defender accepted, so gets it all");
+}
+
+section("Defender EXP: up to CAPS.defendedPerDay battles a day");
+{
+  const td = world();
+  for (const id of ["C", "D"]) td[id] = trainer(id, [[16], [19]], FULL_A);
+  getBattleRecord(td.B, utcDay(NOW)).defended = CAPS.defendedPerDay - 1;
+  const last = open(td, 30, "C", "B");
+  assertTrue(last.ok && !!last.exp.B, "the 10th defence of the day still earns EXP");
+  const leveling = JSON.stringify([td.B.training, td.B.box]);
+  const over = open(td, 31, "D", "B");
+  assertTrue(over.ok && !!over.exp.D, "past it the battle runs and the Challenger still earns");
+  assertEqual(over.exp.B, undefined, "but the Defender earns nothing");
+  assertEqual(JSON.stringify([td.B.training, td.B.box]), leveling, "…and their Team is unchanged");
+  assertEqual(td.B.battle.started, 0, "defending never uses the Defender's own battles");
+  assertTrue(!!open(td, 32, "B", "C").exp.B, "the Defender still earns from battles they start");
+  const tomorrow = new Date(NOW.getTime() + 24 * 3600 * 1000);
+  assertTrue(!!runBattle({ trainerData: td, challengerId: "C", defenderId: "B", mode: "open", seed: 33, now: tomorrow }).exp.B, "the limit resets the next UTC day");
+}
+
 section("Casual battle past 3 vs one Defender: needs a Rematch request, earns no EXP");
 {
   const leveling = (u) => JSON.stringify([u.training, u.box]);
@@ -212,7 +252,7 @@ section("Casual battle past 3 vs one Defender: needs a Rematch request, earns no
   assertEqual(out.overCap, "opponent", "outcome names the cap that was hit");
   assertTrue(out.result.knockouts.some((k) => k.bySide === 0), "Challenger scores a knockout (fixture precondition)");
   assertEqual(leveling(td.A), before, "Challenger's Team gains no EXP");
-  assertEqual(out.exp, {}, "no EXP report");
+  assertEqual(out.exp, {}, "no EXP report, for either side");
   assertEqual([td.A.battle.started, td.A.battle.vs.B], [3, 4], "it counts against B but uses none of the day's 10");
   assertEqual(td.A.casual.wins + td.A.casual.losses, 4, "it still counts on the casual record");
   assertEqual(resultScreens(out, { A: "Ash", B: "Gary" }).length, 1, "result text box has no level-up screen");
@@ -241,7 +281,7 @@ section("Casual battle past the daily Battle cap: runs, earns no EXP");
 
   td.A.battle.day = "2026-11-01";
   const nextDay = open(td, 17, "A", "C");
-  assertTrue(nextDay.overCap === null && Object.keys(nextDay.exp).length === 1, "a new UTC day earns EXP again, with no request");
+  assertTrue(nextDay.overCap === null && !!nextDay.exp.A, "a new UTC day earns EXP again, with no request");
 }
 
 section("A battle that runs lifts the Defender's Rematch block on the Challenger");

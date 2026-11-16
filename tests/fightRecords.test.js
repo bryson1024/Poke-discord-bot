@@ -134,7 +134,7 @@ section("Builders: Battles");
   assertTrue(r.fights[0].members[0].every((m) => m.moves.length > 0 && typeof m.moves[0] === "string"), "each member's moves stored by name");
   assertEqual(r.fights[0].result.log.length, casual.result.log.length, "the whole turn log is kept for the replay");
   assertEqual(r.winner, casual.result.winner, "winner side");
-  assertEqual([!!r.rewards.A.exp, r.rewards.B.exp, r.rewards.A.rating], [true, undefined, undefined], "only the Challenger earns EXP; no rating");
+  assertEqual([!!r.rewards.A.exp, !!r.rewards.B.exp, r.rewards.A.rating], [true, true, undefined], "both players' EXP is recorded; no rating");
 
   const ranked = runBattle({ trainerData: td, challengerId: "A", defenderId: "B", mode: "ranked", seed: 8, now: D });
   const rr = battleRecord(ranked, { A: "Ash", B: "Gary" }, td, { now: D });
