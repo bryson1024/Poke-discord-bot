@@ -27,7 +27,7 @@ let lastFocus = null;
 export function itemIcon(item, { size = "md", mega = false } = {}) {
   if (mega) {
     // `mega` may be the slot's Mega Stone placeholder ({ icon, iconSmooth }) or just true;
-    // Black/White Kyurem's DNA Splicers placeholder has no icon, only a glyph.
+    // A fusion form's item placeholder (DNA Splicers, N-Solarizer, N-Lunarizer) has no icon, only a glyph.
     const m = typeof mega === "object" ? mega : null;
     const glyph = m?.glyph ? esc(m.glyph) : "💎";
     const img = m?.icon

@@ -20,7 +20,7 @@ export const SUMMARY_WINDOW = 20;
 
 export const pokemonSprite = (m) => (m.megaForm
   ? `/public/sprites/pokemon/mega/${m.variant === "shiny" ? "shiny" : "normal"}/${m.megaForm}.gif`
-  : `/public/sprites/pokemon/${m.variant === "shiny" ? "shiny" : "normal"}/${m.speciesId}${/^kyurem-(black|white)$/.test(m.fusionForm ?? "") ? `-${m.fusionForm.slice(7)}` : ""}.gif`); // Black/White Kyurem: 646-black.gif
+  : `/public/sprites/pokemon/${m.variant === "shiny" ? "shiny" : "normal"}/${m.speciesId}${/^(kyurem-(black|white)|necrozma-(duskmane|dawnwings))$/.test(m.fusionForm ?? "") ? `-${m.fusionForm.split("-")[1]}` : ""}.gif`); // a fusion form: 646-black.gif, 800-duskmane.gif
 export const trainerSprite = (file) => (file ? `/public/sprites/trainers_2/${file}` : "/public/sprites/items/pokeball.png");
 export const itemLabel = (id) => String(id ?? "").replace(/^item_/, "").split(/[_-]/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
 

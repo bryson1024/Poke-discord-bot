@@ -31,7 +31,7 @@ import { slotCopyUid, slotBoxUid } from "./ownership.js";
 import { copyTraining } from "./box.js";
 // fullSimCutover imports this module back; each uses the other only inside functions.
 import { defaultMoves } from "./fullSimCutover.js";
-import { getFusion, fusionMovesAt, fusionUnlocked, storedTeamFusion, isFusionEnabled } from "../utils/fusions.js";
+import { getFusion, fusionMovesAt, fusionUnlocked, storedTeamFusion, isFusionFormEnabled } from "../utils/fusions.js";
 
 export const TEAM_TYPES = Object.freeze(["display", "battle"]);
 export const MAX_MOVES = 4;
@@ -59,7 +59,7 @@ export function tmMovesFor(user, speciesId, variant, { uid = null } = {}) {
 }
 
 /**
- * Black/White Kyurem (utils/fusions.js): the form's own moves (Fusion Bolt +
+ * Fusion forms (utils/fusions.js): the form's own moves (Fusion Bolt +
  * Freeze Shock, Fusion Flare + Ice Burn) this copy may equip while it uses
  * `form`, at or below `level`: only with fusion switched on, the form
  * unlocked on this line, and moves the battle engine knows (the legacy
@@ -67,13 +67,13 @@ export function tmMovesFor(user, speciesId, variant, { uid = null } = {}) {
  */
 export function formMoves(user, speciesId, variant, form, level, { env } = {}) {
   const f = getFusion(form);
-  if (!f || f.species !== Number(speciesId) || !isFusionEnabled(env ?? process.env) || !fusionUnlocked(user, form, normV(variant))) return [];
+  if (!f || f.species !== Number(speciesId) || !isFusionFormEnabled(form, env ?? process.env) || !fusionUnlocked(user, form, normV(variant))) return [];
   return fusionMovesAt(form, level).filter(([, id]) => getMove(id, env)).map(([at, id]) => ({ id, learnedAt: at, source: "form", form }));
 }
 
 /**
  * Every move this copy may equip: level-up moves learned at or below its
- * real Level (earliest Level kept), then its TM moves, then (a Kyurem using
+ * real Level (earliest Level kept), then its TM moves, then (a Pokémon using
  * a fusion form, `form`) that form's moves. [{ id, learnedAt|null, source }]
  */
 export function learnableMoves(user, speciesId, variant, { level = null, uid = null, env, form = null } = {}) {
@@ -99,7 +99,7 @@ export function learnableMoves(user, speciesId, variant, { level = null, uid = n
  * still use (null when none is stored or none survives → automatic moves).
  * With a valid `uid`, the copy's own selection is used first, then the line's.
  */
-// `form` (Black/White Kyurem): the fusion form this copy fights as, whose own
+// `form` (a fusion form): the fusion form this copy fights as, whose own
 // moves count too. undefined = the form it uses on that stored team (none
 // when fusion is off or the partner is gone, so those moves drop out).
 export function chosenMoves(user, team, speciesId, variant, { uid = null, form } = {}) {

@@ -73,7 +73,7 @@ export function normalizeDisplayedTeam(user) {
       // Any copy of the line (docs/adr/0001); trained copies are copies too.
       const uid = slotBoxUid(user, { ...slot, uid: t?.uid }) ?? slotCopyUid(user, { ...slot, uid: t?.uid });
       let out = mega && Number.isInteger(slot.id) && megaFitsSlot(user, slot, mega) ? { ...slot, mega } : slot;
-      // Black/White Kyurem (utils/fusions.js): kept while still unlocked.
+      // Fusion forms (utils/fusions.js): kept while still unlocked.
       const form = storedFusion(user, slot, t, "Casual");
       if (form) out = { ...out, form };
       return uid ? { ...out, uid } : out;
@@ -121,7 +121,7 @@ export function prepareTeamSelection(user, rawTeam, { env = process.env } = {}) 
       if (!uid) return fail(400, "That Pokémon copy no longer exists. Reload and try again.", "unknown_copy");
       out = { ...out, uid };
     }
-    // Black/White Kyurem: a well-formed form id, checked below.
+    // Fusion forms: a well-formed form id, checked below.
     if (hasFormKey(entry)) {
       const form = fusionFieldOf(entry);
       if (!form) return fail(400, "Invalid form.", "bad_form");

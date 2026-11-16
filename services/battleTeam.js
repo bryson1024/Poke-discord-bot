@@ -25,12 +25,15 @@ import { toTeamObj, normVariant } from "../utils/economyRules.js";
 import { getSpeciesEntry } from "../utils/speciesCatalog.js";
 import { megaFieldOf, megaFitsSlot, prepareTeamSelection } from "./megaTeam.js";
 import { storedFusion } from "./fusionTeam.js";
+import { isFusedSlot, getFusion } from "../utils/fusions.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
 import { addNotice, NOTICE_KINDS } from "./notices.js";
 
 export const BATTLE_TEAM_MAX_MYTHIC = 1;
 
 export const isMythicTier = (id) => String(getSpeciesEntry(id)?.tier ?? "").toLowerCase() === "mythic";
+/** A team slot counts as mythic-tier: its species is, or it uses a fusion form (Mega-level stat totals, utils/fusions.js). */
+export const isMythicSlot = (s) => isMythicTier(s?.id) || isFusedSlot(s);
 const speciesName = (id) => getSpeciesEntry(id)?.name ?? `#${id}`;
 
 /** True when the player has ever set (or been given) a Battle team. */
@@ -73,7 +76,7 @@ export function trimBattleTeamMythics(user, now = Date.now()) {
   let kept = null;
   const removed = [];
   user.battleTeam = user.battleTeam.filter((s) => {
-    if (!isMythicTier(s.id)) return true;
+    if (!isMythicSlot(s)) return true;
     if (kept == null) { kept = s; return true; }
     removed.push(s);
     return false;
@@ -108,9 +111,9 @@ export function normalizeBattleTeam(user) {
 export function prepareBattleTeamSelection(user, rawTeam, opts = {}) {
   const prepared = prepareTeamSelection(user, rawTeam, opts);
   if (!prepared.ok) return prepared;
-  const mythics = prepared.team.filter((s) => isMythicTier(s.id));
+  const mythics = prepared.team.filter(isMythicSlot);
   if (mythics.length > BATTLE_TEAM_MAX_MYTHIC) {
-    const names = mythics.map((s) => speciesName(s.id)).join(", ");
+    const names = mythics.map((s) => getFusion(s.form)?.name ?? speciesName(s.id)).join(", "); // a fused slot by its form name
     return {
       ok: false,
       status: 400,

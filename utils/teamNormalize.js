@@ -31,8 +31,8 @@ export function normalizeTeam(rawTeam, maxSize = 6) {
     // Each Pokémon once per team (only the Showcase takes repeats); the slot
     // keeps the copy it names (docs/adr/0001).
     const uid = kept[i] && typeof kept[i] === "object" && typeof kept[i].uid === "string" ? kept[i].uid : null;
-    // Black/White Kyurem (utils/fusions.js): the slot keeps its fusion form id.
-    const form = kept[i] && typeof kept[i] === "object" && typeof kept[i].form === "string" && /^kyurem-(black|white)$/.test(kept[i].form) ? kept[i].form : null;
+    // Fusion forms (utils/fusions.js FUSION_ID_PATTERN): the slot keeps its form id.
+    const form = kept[i] && typeof kept[i] === "object" && typeof kept[i].form === "string" && /^(kyurem-(black|white)|necrozma-(duskmane|dawnwings))$/.test(kept[i].form) ? kept[i].form : null;
     const clean = { id: Number(slot.id), variant: normVariant(slot.variant), ...(uid ? { uid } : {}), ...(form ? { form } : {}) };
     const k = `${clean.id}:${clean.variant}`;
     if (seen.has(k)) continue;

@@ -49,7 +49,7 @@ const q = (params) => new URLSearchParams({ id, ...params }).toString();
 const FALLBACK = `onerror="this.onerror=null;this.src='/public/sprites/items/pokeball.png'"`;
 const pokemonSprite = (m) => (m.megaForm
   ? `/public/sprites/pokemon/mega/${m.variant === "shiny" ? "shiny" : "normal"}/${encodeURIComponent(m.megaForm)}.gif`
-  : `/public/sprites/pokemon/${m.variant === "shiny" ? "shiny" : "normal"}/${Number(m.speciesId)}${/^kyurem-(black|white)$/.test(m.fusionForm ?? "") ? `-${m.fusionForm.slice(7)}` : ""}.gif`); // Black/White Kyurem: 646-black.gif
+  : `/public/sprites/pokemon/${m.variant === "shiny" ? "shiny" : "normal"}/${Number(m.speciesId)}${/^(kyurem-(black|white)|necrozma-(duskmane|dawnwings))$/.test(m.fusionForm ?? "") ? `-${m.fusionForm.split("-")[1]}` : ""}.gif`); // a fusion form: 646-black.gif, 800-duskmane.gif
 const itemLabel = (id) => String(id ?? "").replace(/^item_/, "").split(/[_-]/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
 
 /** A team as the page shows it: sprite, name, Level, shiny, held item. */

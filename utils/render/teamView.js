@@ -24,8 +24,7 @@ import { displaySpeciesName } from "./names.js";
 import { megaShortName, teamMegaStatus } from "../megaDisplay.js";
 import { copyTraining } from "../../services/box.js";
 import { megaFormGate, megaBattleProfile } from "../megas.js";
-import { getFusion, fusionFieldOf, fusionFitsSlot, fusionBattleProfile } from "../fusions.js";
-import { isKyuremFusionEnabled } from "../../config/features.js";
+import { getFusion, fusionFieldOf, fusionFitsSlot, fusionBattleProfile, isFusionFormEnabled } from "../fusions.js";
 import { isMegaCapabilityEnabled } from "../../config/features.js";
 
 const POKEMON = JSON.parse(fs.readFileSync(new URL("../../pokemonData.json", import.meta.url), "utf8"));
@@ -134,9 +133,9 @@ export function buildShowcaseView(user, { displayName = "Trainer", trainerFile =
       const profile = megaBattleProfile(s.mega);
       if (profile) Object.assign(member, { megaForm: s.mega, battleProfile: profile });
     }
-    // Black/White Kyurem: shown while fusion is on and still unlocked (no team rule: it never fights).
+    // A fusion form: shown while enabled and still unlocked (no team rules: it never fights).
     const form = fusionFieldOf(s);
-    if (form && isKyuremFusionEnabled(env) && fusionFitsSlot(user, { id: member.speciesId, variant: member.variant }, form)) {
+    if (form && isFusionFormEnabled(form, env) && fusionFitsSlot(user, { id: member.speciesId, variant: member.variant }, form)) {
       Object.assign(member, { fusionForm: form, battleProfile: fusionBattleProfile(form), name: getFusion(form).name });
     }
     return [member];
