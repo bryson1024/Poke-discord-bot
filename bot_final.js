@@ -91,6 +91,7 @@ import { parseTeamCopy, applyTeamCopy } from "./services/teamCopy.js";
 import { rankBattleRatings } from "./commands/leaderboard.js";
 import { rankedRecord } from "./utils/battle/rewards.js";
 import { saveMoveset, TEAM_TYPES } from "./services/movesets.js";
+import { saveAbility } from "./services/abilities.js";
 import { generateToken, validateToken, getChannelIdForToken, dashboardSessionChannel, requireDashboardSession, requireAdminSession, adminSessionOf, activateAdminSession, activateDashboardSession, ADMIN_MAX_MS, DASHBOARD_MAX_MS, pruneExpiredTokens } from "./utils/dashboardAuth.js";
 import { rarityColors } from "./utils/rarityPalette.js";
 
@@ -2544,6 +2545,30 @@ app.post("/api/pokemon/moveset", express.json({ limit: "4kb" }), async (req, res
     });
   } catch (err) {
     console.error("❌ /api/pokemon/moveset:", err?.message || err);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// ✅ POST — a copy's chosen Ability for one team (owner decision 2026-11-16,
+// like movesets). Body: { id, team: "display"|"battle", pokeId, variant,
+// ability: name | null, uid? }. null → Automatic (the plan's pick per fight).
+// Only the species' regular abilities; full sim only. services/abilities.js.
+app.post("/api/pokemon/ability", express.json({ limit: "2kb" }), async (req, res) => {
+  try {
+    const { id, team, pokeId, variant, ability = null, uid = null } = req.body || {};
+    if (!id || pokeId == null) return res.status(400).json({ success: false, error: "Missing id/pokeId" });
+    if (!TEAM_TYPES.includes(team)) return res.status(400).json({ success: false, error: "Unknown team type" });
+    if (!requireDashboardSession(req, id)) return res.status(403).json({ success: false, error: "Invalid or expired session" });
+    await lockUser(id, async () => {
+      const u = trainerData[id];
+      if (!u) return res.status(404).json({ success: false, error: "User not found" });
+      const r = saveAbility(u, { team, pokeId, variant, ability, uid });
+      if (!r.ok) return res.status(r.status ?? 400).json({ success: false, error: r.error, code: r.code });
+      const saveAck = await saveAndAck(trainerData);
+      return res.json({ ...saveAckFields(saveAck), success: true, team, ...(r.uid && { uid: r.uid }), ability: r.ability, automatic: r.automatic });
+    });
+  } catch (err) {
+    console.error("❌ /api/pokemon/ability:", err?.message || err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

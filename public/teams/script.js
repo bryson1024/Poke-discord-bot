@@ -27,7 +27,7 @@ import { playerId, showBanner, showExpired, toast, showActionError, confirmDialo
 import { displaySpeciesName } from "/public/shared/names.js";
 import { scanFx } from "/public/shared/spriteFx.js";
 import { openMovesEditor } from "/public/teams/moves.js";
-import { loadPlans, planRowHtml, savePlan, recommendedFor } from "/public/teams/plans.js";
+import { loadPlans, planRowHtml, savePlan, recommendedFor, abilityChanges } from "/public/teams/plans.js";
 import { chooseCopy } from "/public/teams/copyPicker.js";
 import { openItemPicker, itemIcon, claimStarter } from "/public/teams/items.js";
 import { openDetail } from "/public/picker-pokemon/detail.js";
@@ -850,6 +850,22 @@ async function refreshPlans() {
   render();
 }
 async function choosePlan(team, plan) {
+  // Pokémon on Automatic whose ability this plan changes: list them and ask first.
+  const changes = abilityChanges(state.plans, team, plan);
+  if (changes.length) {
+    const planName = state.plans.plans.find((p) => p.id === plan)?.name ?? plan;
+    const ok = await confirmDialog({
+      title: `Switch to ${planName}?`,
+      message: [
+        `${changes.length === 1 ? "This Pokémon's ability changes" : `${changes.length} Pokémon change ability`} on your ${LABEL[team]}:`,
+        ...changes.map((c) => `• ${species(c.speciesId).name}${c.variant === "shiny" ? " ✨" : ""}: ${c.from} → ${c.to}`),
+        "Their ability is set to Automatic. To keep one, choose it in Edit moves & ability.",
+      ].join("\n"),
+      okText: "Switch plan",
+      cancelText: "Cancel",
+    });
+    if (!ok) return render(); // puts the menu back on the current plan
+  }
   try {
     state.plans.teams[team] = await savePlan(userId, team, plan);
     toast("Battle plan saved", { tone: "success" });
@@ -1054,14 +1070,14 @@ const slotsOnScreen = (id) => (variant) => {
   return { display, battle, unsaved: display !== savedAt("display") || battle !== savedAt("battle") };
 };
 
-/** From a team card: stats (Lv 50 first on the Battle team), Edit moves, Open in Collection. */
+/** From a team card: stats (Lv 50 first on the Battle team), Edit moves (and ability, full sim), Open in Collection. */
 function openTeamDetails(t, i) {
   const s = team(t)[i];
   if (!s) return;
   openDetail(s.id, {
     userId,
     apiJSON,
-    actionsHTML: () => `<button type="button" class="cc-btn" data-act="moves">Edit moves</button>
+    actionsHTML: (d, variant) => `<button type="button" class="cc-btn" data-act="moves">${d.copies?.[variant]?.ability ? "Edit moves &amp; ability" : "Edit moves"}</button>
       <button type="button" class="cc-btn" data-act="collection">Open in Collection</button>`,
     onAction: (act, d, variant) => {
       // The slot's own copy (TM system): its trained copy when the variant matches the slot.

@@ -202,7 +202,7 @@ export function addCopy(user, id, variant, { exp = null, at = Date.now(), uid = 
 
 /**
  * Remove one copy and everything that points at it (team slots, per-copy
- * movesets, TM record). Returns the removed record (with its TM record, if
+ * movesets and Ability choices, TM record). Returns the removed record (with its TM record, if
  * any) so a Gift can hand it on. The caller has done all the checks.
  */
 export function takeCopy(user, uid) {
@@ -215,7 +215,7 @@ export function takeCopy(user, uid) {
     if (Object.keys(user.customPokemon).length === 0) delete user.customPokemon;
   }
   for (const { field, index } of slotsHolding(user, uid)) delete user[field][index].uid;
-  for (const team of Object.values(user.movesets ?? {})) {
+  for (const team of [...Object.values(user.movesets ?? {}), ...Object.values(user.abilities ?? {})]) {
     if (team && typeof team === "object") delete team[`u:${uid}`];
   }
   syncLine(user, rec.id, variantOf(rec));

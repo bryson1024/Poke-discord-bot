@@ -4,7 +4,8 @@
 //   GET  /api/battle-plans?id=…   plans, and each fighting Team's plan,
 //                                 readiness (who helps, by name), and each
 //                                 member's recommended moves (the Moves
-//                                 editor marks them and can fill them in)
+//                                 editor marks them and can fill them in),
+//                                 and each member's Ability per plan
 //   POST /api/battle-plan         { id, team: "display"|"battle", plan }
 // Session-checked like every dashboard route. A plan is only ever set
 // here, validated under the player's lock, never through the dashboard
@@ -16,6 +17,8 @@ import { isFullSimEnabled } from "../config/fullSim.js";
 import { BATTLE_PLANS, PLAN_TEAMS, setPlan, teamPlanView, recommended } from "./battlePlans.js";
 import { normalizeTeam } from "../utils/teamNormalize.js";
 import { getMove } from "../utils/battle/data.js";
+import { chosenAbility } from "./abilities.js";
+import { pickAbility } from "../utils/battle/ai/abilities.js";
 
 const planCard = ({ id, name, blurb, hint = [] }) => ({ id, name, blurb, hint });
 
@@ -32,12 +35,21 @@ export function createBattlePlanHandlers({ getTrainerData, isAuthorized, lockUse
     const slots = normalizeTeam(user[field] ?? [], 6).map((slot) => ({
       speciesId: slot.id, variant: slot.variant, ...(slot.uid && { uid: slot.uid }),
       recommended: recommended(user, team, slot.id, slot.variant, { uid: slot.uid ?? null }),
+      // Its Ability: the player's choice (null = Automatic) and what Automatic
+      // picks under each plan, so the page can warn before a plan change
+      // swaps abilities. A Mega slot keeps its Mega's own ability: none.
+      ...(!slot.mega && { ability: abilityByPlan(user, team, slot) }),
     }));
     const view = teamPlanView(user, team);
     const nameOf = (id) => getMove(id)?.name ?? id;
     const helpers = view.readiness.helpers.map((h) => ({ name: h.name, moveNames: h.moves.map(nameOf), ability: h.ability }));
     return { ...view, readiness: { ...view.readiness, helpers, missingNames: view.readiness.missing.map(nameOf) }, slots };
   };
+
+  const abilityByPlan = (user, team, slot) => ({
+    chosen: chosenAbility(user, team, slot.id, slot.variant, { uid: slot.uid ?? null }),
+    byPlan: Object.fromEntries(BATTLE_PLANS.map((p) => [p.id, pickAbility(slot.id, p.id) ?? null])),
+  });
 
   return {
     async get(req, res) {

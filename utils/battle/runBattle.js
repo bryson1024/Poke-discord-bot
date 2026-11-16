@@ -32,6 +32,7 @@ import { liftRematchBlock } from "./rematch.js";
 import { wagerEligibility } from "./wager.js";
 import { teamCuteness } from "./cuteness.js";
 import { chosenMoves, keepMovesOnLevelUp } from "../../services/movesets.js";
+import { chosenAbility } from "../../services/abilities.js";
 import { resolveBattleMega } from "../../services/megaTeam.js";
 import { megaBattleEligibility, megaBattleProfile } from "../megas.js";
 import { isMegaCapabilityEnabled } from "../../config/features.js";
@@ -62,6 +63,8 @@ export function withBothLocks(lockUser, idA, idB, fn) {
 // stay the base line's, so EXP, Levels and ownership never see the Mega.
 // movesetTeam: whose chosen movesets apply ("display" for casual battles and
 // displays, "battle" for ranked/wager). Members without one use automatic moves.
+// The same team's chosen Ability (services/abilities.js) rides on the member
+// as `chosenAbility`; without one the full sim picks it for the plan.
 // TM system (T1): a slot naming a customized copy (`uid`, services/ownership.js)
 // fights with that copy's moves (its TM moves included); the member carries
 // `uid`. Slots without one are built exactly as before.
@@ -97,6 +100,11 @@ export function buildTeam(user, { env = process.env, team = user.displayedPokemo
       else if (isFullSimEnabled(env)) {
         const record = cutoverRecord(user, slot, member.level);
         if (record) member.moves = cutoverMoves(record, slot.id, member.level);
+      }
+      // Full sim: the Ability picked for this team (else Automatic, chosen per fight in showdown/simulate.js).
+      if (isFullSimEnabled(env)) {
+        const ability = chosenAbility(user, movesetTeam, slot.id, slot.variant, { uid: copyUid ?? uid });
+        if (ability) member.chosenAbility = ability;
       }
       // A slot battling as a Mega never uses a regular item (its Mega Stone fills the slot).
       const item = items.get(key) ?? (copyUid ? items.get(`${slot.id}:${slot.variant}`) : undefined);
