@@ -53,4 +53,48 @@ section("Mega forms when Mega teams are on");
   assertTrue(body.megaForms.some((f) => f.id === "mega-charizard-x") && body.megaForms.every((f) => f.unlocked.normal === false), "listed, locked (none unlocked)");
 }
 
+section("a copy's own moves and Level (the drawer of a Teams slot / box tile), 2026-11-15");
+{
+  // Zapdos Lv 52 as a box copy on the Ranked team, with an old line-level
+  // Ranked pick and the copy's own pick: battles use the copy's.
+  const { addCopy } = await import("../services/box.js");
+  const { saveMoveset } = await import("../services/movesets.js");
+  const { buildBattleTeam } = await import("../utils/battle/runBattle.js");
+  const { expForLevel } = await import("../utils/training.js");
+  const u = { pokemon: {} };
+  const uid = addCopy(u, 145, "normal", { exp: expForLevel(52) }).uid;
+  addCopy(u, 145, "normal", { exp: expForLevel(20) });
+  u.battleTeam = [{ id: 145, variant: "normal", uid }];
+  u.movesets = { battle: { "145:normal": ["peck", "thundershock", "pluck", "ancientpower"] } };
+  const picked = ["thundershock", "pluck", "ancientpower", "discharge"];
+  assertTrue(saveMoveset(u, { team: "battle", pokeId: 145, variant: "normal", moves: picked, uid }).ok, "Discharge saved for the slot's copy");
+  const line = pokemonDetail(u, 145).body.copies.normal;
+  const own = line.each.find((c) => c.uid === uid);
+  assertEqual(own.movesets.battle.map((m) => m.id), picked, "the copy's Ranked moves are the saved ones");
+  assertEqual(own.movesets.battle.map((m) => m.id), buildBattleTeam(u)[0].moves, "…and what the ranked battle uses");
+  assertEqual(own.teams, { display: null, battle: 1 }, "the copy knows its slots");
+  assertEqual([own.level, own.stats, own.power], [52, slotView(u, { speciesId: 145, variant: "normal", level: 52, copyUid: uid }, 0).stats, own.power], "the copy's Level and stats");
+  const low = line.each.find((c) => c.uid !== uid);
+  assertEqual(low.level, 20, "each copy has its own Level");
+  assertTrue(low.power < own.power, "and its own stats");
+}
+
+section("learnset: every level-up move with its Level, TMs while TMs are on");
+{
+  const off = pokemonDetail(user(), 145, { env: {} }).body.learnset;
+  const { getSpecies } = await import("../utils/battle/data.js");
+  const firstAt = new Map();
+  for (const [at, m] of getSpecies(145).levelMoves) if (!firstAt.has(m)) firstAt.set(m, at);
+  assertEqual(off.levelUp.map((m) => [m.id, m.learnedAt]), [...firstAt], "Zapdos level-up moves, each once at its first Level, in Level order (the battle's learnset)");
+  assertTrue(off.levelUp.some((m) => m.id === "discharge"), "Discharge listed");
+  assertTrue(off.levelUp.every((m) => m.type && m.category && m.name), "type, category and name on every move");
+  assertEqual(off.tm, [], "no TMs listed while TMs are off");
+  const on = pokemonDetail(user(), 145, { env: { TM_ENABLED: "1" } }).body.learnset;
+  assertTrue(on.tm.length > 0 && on.tm.some((m) => m.id === "thunderbolt"), "TM moves listed (Thunderbolt)");
+  assertTrue(on.tm.every((m) => m.type && m.category), "TM moves carry type and category");
+  const { canLearnByTm } = await import("../utils/battle/tmData.js");
+  assertTrue(on.tm.every((m) => canLearnByTm(145, m.id)), "only TMs it can learn");
+  assertEqual(pokemonDetail({}, 145, { env: {} }).status, 200, "works for an unowned species (Pokédex)");
+}
+
 finish();

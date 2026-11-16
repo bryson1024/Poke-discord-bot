@@ -26,7 +26,7 @@ The sprite credits for Pokémon and trainer artists are at `/credits`, linked fr
 
 ## Collection and Pokédex
 
-Every Pokémon a player owns is its own Copy (`services/box.js`), with its own Level and EXP. The Pokédex records every species and shiny the player has ever caught. It never drops, so giving up a last Copy leaves the species registered. Pokédex completion and the Pokédex-named achievements (each region's Pokédex Complete, National Pokédex Complete, and Prismatic Pokédex) count the Pokédex. The ones that say "at the same time" (Living Pokédex, Hall of Legends, Mythic Archive) count the Collection. A catch card says NEW the first time a species enters the Pokédex, and NEW SHINY for the first shiny of a species already in it. The design is in [`docs/adr/0001-individual-copies-and-permanent-pokedex.md`](docs/adr/0001-individual-copies-and-permanent-pokedex.md).
+Every Pokémon a player owns is its own Copy (`services/box.js`), with its own Level and EXP. The Pokédex records every species and shiny the player has ever caught. It never drops, so giving up a last Copy leaves the species registered. Pokédex completion and the Pokédex-named achievements (each region's Pokédex Complete, National Pokédex Complete, and Prismatic Pokédex) count the Pokédex. The ones that say "at the same time" (Living Pokédex, Hall of Legends, Mythic Archive) count the Collection. A catch card says NEW the first time a species enters the Pokédex, and NEW SHINY for the first shiny of a species already in it. On the Pokédex page, a caught species opens its details: base stats and every move it can learn, with its Level or TM. The design is in [`docs/adr/0001-individual-copies-and-permanent-pokedex.md`](docs/adr/0001-individual-copies-and-permanent-pokedex.md).
 
 The Collection page shows one tile per Copy, with its Level, its Tier, a ★ TM mark on a Trained copy, and a C, R, or S badge for each Team it's on. It filters by search, rarity, type, region, and Shiny only. Each region chip shows that region's Pokédex completion, such as "Kanto 75/151", counted over the whole region whatever the other filters say. It sorts by Pokédex number, Power, Level, Newest, or Name, and groups the tiles by region under Pokédex number. Tapping a tile opens the mode's action for that Copy. When the player owns more than one Copy of it, or a Trained one, a "Which one?" chooser comes first with the tapped Copy picked.
 
@@ -379,7 +379,7 @@ npm test                  # the same, but TRAINERDATA_DIR must name a writable f
 
 - `showcaseTeam`: the Showcase filled once from the Casual team at launch and never refilled once emptied, repeats as separate Copies (a slot with no Copy left is dropped), Showcase Copies counting as on a Team, dashboard saves (a named Copy kept, no Copy left, one Copy in two slots, unowned, over 6, empty allowed, a malformed Mega), and the load path.
 - `twoCopiesTeam`: the Casual and Ranked teams holding each Pokémon once while the Showcase takes repeats, the slot's Copy being the one that fights, and held items belonging to the Copy in the slot, including an older per-line item moved onto it.
-- `teamCopy`: Copy from requests (no source, duplicates dropped, onto itself, an unknown source) and moves following only the Pokémon copied.
+- `teamCopy`: Copy from requests (no source, duplicates dropped, onto itself, an unknown source) and moves following only the Pokémon copied, written to each slot's own Copy, so the battle uses them.
 - `copyMovesets`: learnable moves following each Copy's own Level, a separate Moveset per Copy, and battles using the slot's Copy for its Level and moves.
 - `movesetSaveRoute`: saving moves for a box Copy on the Casual and Ranked teams, clearing back to automatic moves, refusing an unknown or wrong-species Copy, repairing a stale slot at load, and the route going through `saveMoveset`.
 
@@ -452,7 +452,8 @@ The dashboard and card tests cover:
 
 - `dashboardFoundation`: the pages and navigation, and that the dashboard's Pokémon names and search match the bot's.
 - `gameplayRoutes`: the dashboard's catch, evolve, convert, and Weekly Pack handlers, including an evolution target that isn't one and a Team Copy evolving in its slots.
-- `pokemonDetail`: the Collection page's detail panel matches the Discord cards and changes nothing.
+- `pokemonDetail`: the Collection page's detail panel matches the Discord cards and changes nothing. Each Copy carries its own Level, stats and moves on each Team, and those are the moves battles use. The learnset lists every level-up move at its first Level, plus the TMs it can learn while TMs are on.
+- `detailMoves`: the details panel of a Team slot or a Collection tile shows that Copy's moves on each Team, never the line's older pick. The Pokédex panel lists the learnset with an All / Level-up / TM filter.
 - `pokemonPower`: the dashboard's per-Pokémon Power adds up to the cards' Team Power.
 - `spriteFx`: the dashboard's shiny and trainer backdrops match the Discord cards pixel for pixel.
 - `commandCards`: the EXP, leaderboard, daily, trainer, Pokédex, and inspect cards, what they show, their fallbacks, and that they change nothing.

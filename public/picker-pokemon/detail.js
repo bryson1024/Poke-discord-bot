@@ -17,12 +17,18 @@
 //                       page's current (maybe unsaved) team slots instead
 //                       of the saved ones
 //            megaName:  set when the slot battles as a Mega form
+//            uid:       the copy to show (a Teams slot, a Collection box
+//                       tile): its Level, stats and equipped moves per team
+//            mode:      "dex" (Pokédex): base stats and every move it can
+//                       learn (level-up / TM filter) instead of equipped moves
+// The move choices are public/picker-pokemon/detailMoves.js.
 // ==========================================================
 
 import { scanFx } from "/public/shared/spriteFx.js";
 import { pageHref } from "/public/shared/shell.js";
 import { openTeachDialog } from "/public/shared/teachTm.js";
 import { moveMeta } from "/public/shared/moveMeta.js";
+import { pickCopy, equippedMoves, learnsetRows, learnLabel } from "/public/picker-pokemon/detailMoves.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const dex = (id) => `#${String(id).padStart(4, "0")}`;
@@ -34,6 +40,7 @@ let dialog = null;
 let lastFocus = null;
 let shownVariant = "normal";
 let statLevel = "real"; // "real" | "50"
+let learnFilter = "all"; // Pokédex: "all" | "level" | "tm"
 
 function ensureDialog() {
   if (!document.getElementById("detailStyles")) {
@@ -106,6 +113,39 @@ function collectionActions(d, ctx, opts) {
     <a class="cc-btn cc-btn--primary" href="${pageHref("/public/teams/", ctx.userId)}">Use on a team</a>`;
 }
 
+// A copy's drawer: that copy's Level, stats and the moves it is equipped
+// with on each team, the same moves battles use. The copy is the one the
+// page named (opts.uid, kept only while its variant is shown), else the
+// best copy of the shown variant.
+function copyMovesSection(d, line, ctx, opts) {
+  const copy = pickCopy(line, opts.variant === shownVariant ? opts.uid : null);
+  const view = copy?.stats ? { ...line, level: copy.level, stats: copy.stats, power: copy.power } : line;
+  const many = (line.each?.length ?? 0) > 1;
+  const where = copy?.teams ? [copy.teams.display ? `Casual slot ${copy.teams.display}` : "", copy.teams.battle ? `Ranked slot ${copy.teams.battle}` : ""].filter(Boolean).join(" · ") : "";
+  const next = copy?.nextMoves ?? line.nextMoves ?? [];
+  return `${statsSection(view)}
+    ${many && copy ? `<p class="dt-muted dt-which">Showing your ${shownVariant === "shiny" ? "shiny " : ""}${esc(d.name)} at Lv ${copy.level}${where ? ` (${where})` : ""}.</p>` : ""}
+    ${["display", "battle"].map((team) => {
+      const { auto, moves } = equippedMoves(line, copy, team);
+      return `<section class="dt-sec"><h3>${team === "battle" ? "Ranked team moves" : "Casual team moves"}${auto ? " · automatic" : ""}</h3><div class="dt-moves">${moves.map((m) => `<div class="dt-move"><span>${esc(m.name)}${moveMeta(m)}</span></div>`).join("")}</div></section>`;
+    }).join("")}
+    <section class="dt-sec"><p class="dt-muted" style="margin:0">${next.length ? `Learns next: ${next.map((m) => esc(m.name)).join(", ")}. ` : ""}${ctx.actionsHTML ? "Each team keeps its own moves." : `Change moves on the <a href="${pageHref("/public/teams/", ctx.userId)}">Teams page</a> (each team keeps its own).`}</p></section>`;
+}
+
+// Pokédex: every move the species can learn, with a Level-up / TM filter.
+function learnsetSection(d) {
+  const ls = d.learnset ?? { levelUp: [], tm: [] };
+  const hasTm = ls.tm.length > 0;
+  if (!hasTm && learnFilter === "tm") learnFilter = "all";
+  const rows = learnsetRows(ls, learnFilter);
+  const btn = (f, label, n) => `<button type="button" data-learn="${f}" aria-pressed="${learnFilter === f}">${label} <small>${n}</small></button>`;
+  const total = learnsetRows(ls, "all").length;
+  const filters = hasTm ? `<div class="dt-lvseg dt-learnseg" role="group" aria-label="Show moves">${btn("all", "All", total)}${btn("level", "Level-up", ls.levelUp.length)}${btn("tm", "TM", ls.tm.length)}</div>` : "";
+  return `<section class="dt-sec"><div class="dt-sec-head"><h3>Moves it can learn</h3>${filters}</div>
+    ${rows.length ? `<ul class="dt-learnset">${rows.map((m) => `<li class="dt-move"><span>${esc(m.name)}${moveMeta(m)}</span><small class="dt-learnat">${esc(learnLabel(m, learnFilter))}</small></li>`).join("")}</ul>` : `<p class="dt-muted">No moves to show.</p>`}
+    ${hasTm ? "" : `<p class="dt-muted">Level-up moves only.</p>`}</section>`;
+}
+
 function render(d, ctx, opts) {
   const copies = d.copies ?? {};
   const owned = Object.keys(copies);
@@ -116,6 +156,7 @@ function render(d, ctx, opts) {
     : "";
   const evo = [...d.evolvesFrom.map((e) => ({ ...e, rel: "from" })), { id: d.id, name: d.name, rel: "this" }, ...d.evolvesTo.map((e) => ({ ...e, rel: "to" }))];
   const art = owned.length ? sprite(d.id, shownVariant) : `/public/sprites/pokemon/grayscale/${d.id}.gif`;
+  const dexMode = opts.mode === "dex";
   const actions = owned.length ? (ctx.actionsHTML ? ctx.actionsHTML(d, shownVariant) : collectionActions(d, ctx, opts)) : "";
   dialog.innerHTML = `
     <div class="dt-head">
@@ -135,17 +176,13 @@ function render(d, ctx, opts) {
     <section class="dt-sec"><h3>Your copies</h3>
       ${owned.length ? owned.map((v) => `<div class="dt-copy"><img src="${sprite(d.id, v)}" alt=""><span>${v === "shiny" ? "✨ Shiny" : "Normal"} ×${copies[v].count} · <b>Lv ${copies[v].level}</b><br><small>${slotLine(copies[v], v, opts)}</small></span></div>`).join("") : `<p class="dt-muted">Not caught yet.</p>`}
       ${trainedRows(copies)}
-      ${d.tm?.enabled && c ? `<button type="button" class="cc-btn" data-act="teach">Teach a TM${owned.length > 1 ? ` (${shownVariant === "shiny" ? "shiny" : "normal"})` : ""}</button>` : ""}
+      ${d.tm?.enabled && c && !dexMode ? `<button type="button" class="cc-btn" data-act="teach">Teach a TM${owned.length > 1 ? ` (${shownVariant === "shiny" ? "shiny" : "normal"})` : ""}</button>` : ""}
     </section>
     ${d.megaForms?.length ? `<section class="dt-sec"><h3>Mega forms</h3><div class="dt-forms">${d.megaForms.map((f) => `<div class="dt-form"><img src="/public/sprites/pokemon/mega/${shownVariant === "shiny" ? "shiny" : "normal"}/${esc(f.id)}.gif" alt=""><b>${esc(f.name)}</b><small>${f.unlocked[shownVariant] ? "Unlocked" : "Locked"}</small></div>`).join("")}</div><p class="dt-muted">Forms of ${esc(d.name)}: they never count as Pokédex entries.</p></section>` : ""}
-    ${c ? `${statsSection(c)}
-      ${["display", "battle"].map((team) => {
-        const set = c.movesets?.[team];
-        const list = set ?? c.moves;
-        return `<section class="dt-sec"><h3>${team === "battle" ? "Ranked team moves" : "Casual team moves"}${set ? "" : " · automatic"}</h3><div class="dt-moves">${list.map((m) => `<div class="dt-move"><span>${esc(m.name)}${moveMeta(m)}</span></div>`).join("")}</div></section>`;
-      }).join("")}
-      <section class="dt-sec"><p class="dt-muted" style="margin:0">${c.nextMoves.length ? `Learns next: ${c.nextMoves.map((m) => esc(m.name)).join(", ")}. ` : ""}${ctx.actionsHTML ? "Each team keeps its own moves." : `Change moves on the <a href="${pageHref("/public/teams/", ctx.userId)}">Teams page</a> (each team keeps its own).`}</p></section>`
-    : d.baseStats ? `<section class="dt-sec"><h3>Base stats</h3>${statBars(d.baseStats)}<p class="dt-muted">Total ${d.baseTotal}</p></section>` : ""}
+    ${dexMode
+      ? `${d.baseStats ? `<section class="dt-sec"><h3>Base stats</h3>${statBars(d.baseStats)}<p class="dt-muted">Total ${d.baseTotal}</p></section>` : ""}${learnsetSection(d)}`
+      : c ? copyMovesSection(d, c, ctx, opts)
+      : d.baseStats ? `<section class="dt-sec"><h3>Base stats</h3>${statBars(d.baseStats)}<p class="dt-muted">Total ${d.baseTotal}</p></section>` : ""}
     ${evo.length > 1 ? `<section class="dt-sec"><h3>Evolution</h3><div class="dt-evo">${evo.map((e) => `<button type="button" class="dt-evo-step${e.rel === "this" ? " is-this" : ""}" data-species="${e.id}"${e.rel === "this" ? ' aria-current="true"' : ""}><img src="/public/sprites/pokemon/normal/${e.id}.gif" alt="">${esc(e.name)}</button>`).join('<span aria-hidden="true">›</span>')}</div></section>` : ""}
     ${actions ? `<section class="dt-sec dt-actions">${actions}</section>` : ""}`;
   scanFx(dialog);
@@ -160,6 +197,7 @@ async function load(id, ctx, opts) {
     const owned = Object.keys(d.copies ?? {});
     shownVariant = opts.variant && owned.includes(opts.variant) ? opts.variant : owned.includes("normal") ? "normal" : owned[0] ?? "normal";
     statLevel = opts.level === "50" ? "50" : "real";
+    learnFilter = "all";
     render(d, ctx, opts);
     dialog.onclick = (e) => {
       if (e.target === dialog) return dialog.close();
@@ -167,9 +205,10 @@ async function load(id, ctx, opts) {
       if (!b) return;
       if (b.classList.contains("dt-close")) return dialog.close();
       if (b.dataset.variant) { shownVariant = b.dataset.variant; render(d, ctx, opts); return dialog.querySelector(`[data-variant="${shownVariant}"]`)?.focus(); }
+      if (b.dataset.learn) { learnFilter = b.dataset.learn; render(d, ctx, opts); return dialog.querySelector(`[data-learn="${learnFilter}"]`)?.focus(); }
       if (b.dataset.level) { statLevel = b.dataset.level; render(d, ctx, opts); return dialog.querySelector(`[data-level="${statLevel}"]`)?.focus(); }
       // Another species in the chain: its own details, no page-specific slot or Mega context.
-      if (b.dataset.species && b.dataset.species !== String(d.id)) return load(Number(b.dataset.species), ctx, { level: opts.level });
+      if (b.dataset.species && b.dataset.species !== String(d.id)) return load(Number(b.dataset.species), ctx, { level: opts.level, mode: opts.mode });
       const act = b.dataset.act;
       if (!act || b.disabled || b.getAttribute("aria-disabled") === "true") return;
       if (b.tagName === "A") return; // plain links navigate (pages guard unsaved changes themselves)

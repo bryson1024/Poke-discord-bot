@@ -870,7 +870,8 @@ function onBoxTileClick(c, locked) {
     }
     return showBlockedActionModal(c.id);
   }
-  if (currentMode === "browse") return openDetail(c.id, detailContext());
+  // This copy's details: its Level, stats and equipped moves on each team.
+  if (currentMode === "browse") return openDetail(c.id, detailContext(), { variant: c.shiny ? "shiny" : "normal", uid: c.uid });
   if (currentMode === "evolve") return openEvolutionModal(c.id);
   if (currentMode === "donate") return openDonationConfirmModal(c.id, c.shiny ? "shiny" : "normal");
   if (currentMode === "convert") return openConvertModal(c.id);
@@ -1425,7 +1426,7 @@ async function init() {
     // opens that Pokémon's details on that copy.
     const linked = Number(params.get("pokemon"));
     if (Number.isInteger(linked) && pokemonData[linked]) {
-      openDetail(linked, detailContext(), { variant: params.get("variant") === "shiny" ? "shiny" : "normal" });
+      openDetail(linked, detailContext(), { variant: params.get("variant") === "shiny" ? "shiny" : "normal", uid: params.get("copy") || null });
     }
 
     // Filters

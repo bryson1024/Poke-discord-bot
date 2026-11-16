@@ -24,6 +24,7 @@ import { learnableMoves, chosenMoves, moveInfo as movesetMoveInfo } from "./move
 import { customCopiesOf, plainCount } from "./ownership.js";
 import { isTmEnabled } from "../config/tmFeatures.js";
 import { copiesOf } from "./box.js";
+import { tmMovesForSpecies } from "../utils/battle/tmData.js";
 
 const sum = (s) => (s ? s.hp + s.atk + s.def + s.spa + s.spd + s.spe : null);
 const nameOf = (id) => displaySpeciesName(id, getSpeciesEntry(id)?.name);
@@ -65,6 +66,28 @@ function trainedCopies(user, id, variant, level) {
     teams: copySlots(user, c.uid),
     history: (c.history ?? []).slice(-20),
   }));
+}
+
+/**
+ * Every move the species can learn, for the Pokédex: level-up moves (the
+ * earliest Level each is learned at, Level order) and, while TMs are on,
+ * the TMs it can be taught ("launch" moves, the ones Teach a TM offers).
+ * Same move data as the battle (utils/battle/data.js).
+ */
+export function speciesLearnset(id, { env = process.env } = {}) {
+  const species = getSpecies(id);
+  if (!species) return { levelUp: [], tm: [] };
+  const seen = new Set();
+  const levelUp = [];
+  for (const [at, moveId] of species.levelMoves ?? []) {
+    if (seen.has(moveId) || !getMove(moveId)) continue;
+    seen.add(moveId);
+    levelUp.push({ ...moveInfo(moveId), learnedAt: at });
+  }
+  const tm = isTmEnabled(env)
+    ? tmMovesForSpecies(id, { status: "launch" }).filter((m) => getMove(m)).map(moveInfo).sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+  return { levelUp, tm };
 }
 
 /**
@@ -111,10 +134,18 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
       trained: species ? trainedCopies(user, id, variant, level) : [],
       // Every copy is its own Pokémon (docs/adr/0001): its Level, the moves
       // it may equip there, and its own moveset on each team.
-      each: species ? copiesOf(user, id, variant).map((c) => ({
+      // A copy's details drawer (Teams slot, Collection box tile) shows these:
+      // what that copy fights with on each team (movesets ?? moves).
+      each: species ? copiesOf(user, id, variant).map((c) => {
+        const cv = slotView(user, { speciesId: id, variant, level: c.level, copyUid: c.uid }, 0);
+        return {
         uid: c.uid,
         level: c.level,
         trained: c.trained,
+        expFrac: cv.expFrac,
+        stats: cv.stats,
+        power: cv.statTotal,
+        teams: copySlots(user, c.uid),
         moves: defaultMoves(user, { id, variant, uid: c.uid }, c.level).map(moveInfo),
         nextMoves: movesLearned(id, c.level, Math.min(100, c.level + 20)).map(moveInfo),
         learnable: learnableMoves(user, id, variant, { uid: c.uid }).map((m) => ({ ...movesetMoveInfo(m.id), learnedAt: m.learnedAt, source: m.source })),
@@ -122,7 +153,8 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
           display: chosenMoves(user, "display", id, variant, { uid: c.uid })?.map(movesetMoveInfo) ?? null,
           battle: chosenMoves(user, "battle", id, variant, { uid: c.uid })?.map(movesetMoveInfo) ?? null,
         },
-      })) : [],
+        };
+      }) : [],
     };
   }
 
@@ -153,6 +185,8 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
       owned: counts,
       copies,
       megaForms,
+      // Pokédex: every move it can learn (level-up with Levels, TMs).
+      learnset: speciesLearnset(id, { env }),
       // TM system (T4): whether "Teach a TM" is offered (TM_ENABLED).
       tm: { enabled: isTmEnabled(env) },
     },
