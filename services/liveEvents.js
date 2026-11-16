@@ -21,7 +21,7 @@ const pokemonData = JSON.parse(readFileSync(new URL("../pokemonData.json", impor
 
 export const liveEventsPath = () => path.join(process.env.TRAINERDATA_DIR || ".", "live-events.json");
 
-const empty = () => ({ events: [], settings: { channelId: null }, nextId: 1 });
+const empty = () => ({ events: [], settings: { channelId: null, roleId: null }, nextId: 1 });
 let state = empty();
 
 /** Load from disk. A missing file is an empty state; a broken one is reported and left untouched on disk. */
@@ -171,14 +171,21 @@ export async function deleteLiveEvent(id, { admin, reason, now = Date.now() }) {
   return { ok: true, audited: audited.ok };
 }
 
-export async function setAnnounceChannel(channelId, { admin }) {
+/**
+ * Where start/end posts go, and which role the start post pings. Either can
+ * be empty: no channel posts nothing, no role posts without a ping.
+ */
+export async function setAnnounceChannel(channelId, { admin, roleId } = {}) {
   const id = channelId ? String(channelId).trim() : null;
   if (id && !/^\d{5,25}$/.test(id)) return fail(400, "That isn't a Discord channel id.");
-  const before = state.settings.channelId;
+  const role = roleId ? String(roleId).trim().replace(/^<@&(\d+)>$/, "$1") : null;
+  if (role && !/^\d{5,25}$/.test(role)) return fail(400, "That isn't a Discord role id.");
+  const before = { channelId: state.settings.channelId, roleId: state.settings.roleId ?? null };
   state.settings.channelId = id;
+  state.settings.roleId = role;
   await persist();
-  await appendAudit({ type: "live_event", action: "channel", adminId: admin?.id ?? null, adminName: admin?.name ?? null, before, after: id, reason: "Announcement channel" });
-  return { ok: true, channelId: id };
+  await appendAudit({ type: "live_event", action: "channel", adminId: admin?.id ?? null, adminName: admin?.name ?? null, before, after: { channelId: id, roleId: role }, reason: "Announcement channel and role" });
+  return { ok: true, channelId: id, roleId: role };
 }
 
 // ----------------------------------------------------------
