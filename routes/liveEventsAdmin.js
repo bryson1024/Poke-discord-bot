@@ -101,7 +101,8 @@ export function mountLiveEventRoutes(router, { requireRead, requireWrite, json }
   });
 
   router.post("/api/admin/live-events/channel", requireWrite, json, async (req, res) => {
-    send(res, await setAnnounceChannel(body(req).channelId, { admin: admin(req) }));
+    const b = body(req);
+    send(res, await setAnnounceChannel(b.channelId, { admin: admin(req), roleId: b.roleId }));
   });
 
   router.post("/api/admin/live-events/:id/edit", requireWrite, json, async (req, res) => {

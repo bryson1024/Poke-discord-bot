@@ -3032,10 +3032,12 @@ client.once("ready", async () => {
   setInterval(() => {
     if (!isReady) return;
     postDueAnnouncements({
-      send: async (channelId, embed) => {
+      send: async (channelId, embed, roleId) => {
         const channel = await client.channels.fetch(channelId).catch(() => null);
         if (!channel?.isTextBased?.()) return false;
-        await channel.send({ embeds: [embed] });
+        await channel.send(roleId
+          ? { content: `<@&${roleId}>`, embeds: [embed], allowedMentions: { roles: [roleId] } }
+          : { embeds: [embed], allowedMentions: { parse: [] } });
         return true;
       },
     }).catch((e) => console.warn("⚠️ Live event announcements failed:", e?.message || e));

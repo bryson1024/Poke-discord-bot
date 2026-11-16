@@ -93,18 +93,19 @@ export function announcementEmbed(kind, e) {
 }
 
 /**
- * Post every due start/end announcement. `send(channelId, embed)` resolves
- * true when posted. An end whose start was never posted (the bot was down for
+ * Post every due start/end announcement. `send(channelId, embed, roleId)`
+ * resolves true when posted. Only start posts carry the role to ping; end
+ * posts never ping. An end whose start was never posted (the bot was down for
  * the whole event) is marked done without a post. Without a channel set,
  * posts are marked done so they never flood out later.
  */
 export async function postDueAnnouncements({ send, now = Date.now() }) {
-  const channelId = liveEventSettings().channelId;
+  const { channelId, roleId = null } = liveEventSettings();
   let posted = 0;
   for (const d of duePosts(now)) {
     if (d.kind === "end" && d.skippedStart) { await markPosted(d.event.id, "end"); continue; }
     if (!channelId) { await markPosted(d.event.id, d.kind); continue; }
-    const ok = await send(channelId, announcementEmbed(d.kind, d.event)).catch(() => false);
+    const ok = await send(channelId, announcementEmbed(d.kind, d.event), d.kind === "start" ? roleId : null).catch(() => false);
     if (ok) { await markPosted(d.event.id, d.kind); posted++; }
   }
   return posted;

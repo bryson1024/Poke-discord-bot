@@ -226,6 +226,26 @@ section("Start and end posts");
   await P.postDueAnnouncements({ send: failing, now: t0 });
   await P.postDueAnnouncements({ send, now: t0 });
   assertEqual(sent.at(-1), "🎪 Retry has started!", "a failed post is retried");
+
+  // Role ping: start posts carry the role, end posts don't.
+  S.setLiveEventsForTesting([{ name: "Ping", startAt: t0 - 1, endAt: t0 + HOUR, effects: [{ kind: "cc", value: 2 }] }], { channelId: "123456789012", roleId: "998877665544" });
+  const roles = [];
+  const sendR = async (_ch, embed, role) => { roles.push([embed.data.title, role]); return true; };
+  await P.postDueAnnouncements({ send: sendR, now: t0 });
+  await P.postDueAnnouncements({ send: sendR, now: t0 + 2 * HOUR });
+  assertEqual(roles, [["🎪 Ping has started!", "998877665544"], ["🎪 Ping has ended", null]], "start pings the role; end doesn't");
+}
+
+section("Announcement channel and role settings");
+{
+  const admin = { id: "1", name: "a" };
+  const ok = await S.setAnnounceChannel("123456789012", { admin, roleId: "<@&998877665544>" });
+  assertTrue(ok.ok && ok.roleId === "998877665544", "saves the role (a pasted <@&id> mention works too)");
+  assertEqual(S.liveEventSettings().roleId, "998877665544", "role is in the settings");
+  const bad = await S.setAnnounceChannel("123456789012", { admin, roleId: "everyone" });
+  assertTrue(!bad.ok && bad.status === 400, "a non-id role is refused");
+  const off = await S.setAnnounceChannel("123456789012", { admin, roleId: "" });
+  assertTrue(off.ok && off.roleId === null, "an empty role turns the ping off");
 }
 
 // ----------------------------------------------------------

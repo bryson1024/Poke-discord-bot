@@ -1167,13 +1167,14 @@ async function renderLiveEvents(which) {
     ${group("ended", "Ended", "No past events.")}
     <section class="panel">
       <div class="panel-head"><h2>Announcements</h2></div>
-      <p class="muted">The bot posts in this channel when an event starts and when it ends. Leave it empty to post nothing.</p>
+      <p class="muted">The bot posts in this channel when an event starts and when it ends. Leave it empty to post nothing. The start post pings the role; leave the role empty for no ping.</p>
       <div class="field-row"><label style="flex:2 1 240px">Discord channel ID<input id="liveChannel" value="${esc(r.settings.channelId || "")}" inputmode="numeric" ${ro ? "disabled" : ""} /></label>
-      ${ro ? "" : `<button class="btn-sm" id="liveChannelSave" type="button">Save channel</button>`}</div>
+      <label style="flex:2 1 240px">Role ID to ping<input id="liveRole" value="${esc(r.settings.roleId || "")}" inputmode="numeric" ${ro ? "disabled" : ""} /></label>
+      ${ro ? "" : `<button class="btn-sm" id="liveChannelSave" type="button">Save</button>`}</div>
     </section></div>`;
   $("#liveChannelSave")?.addEventListener("click", async () => {
-    const s = await api("/api/admin/live-events/channel", { method: "POST", body: { channelId: $("#liveChannel").value.trim() || null } });
-    toast(s.ok ? (s.channelId ? "Announcements will post there." : "Announcements are off.") : s.error, !s.ok);
+    const s = await api("/api/admin/live-events/channel", { method: "POST", body: { channelId: $("#liveChannel").value.trim() || null, roleId: $("#liveRole").value.trim() || null } });
+    toast(s.ok ? (!s.channelId ? "Announcements are off." : s.roleId ? "Saved. Start posts will ping the role." : "Saved. Posts won't ping anyone.") : s.error, !s.ok);
   });
   $("#livePage").addEventListener("click", (e) => {
     const b = e.target.closest("[data-live-act]");
