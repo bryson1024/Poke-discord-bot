@@ -178,7 +178,7 @@ function render(d, ctx, opts) {
       ${trainedRows(copies)}
       ${d.tm?.enabled && c && !dexMode ? `<button type="button" class="cc-btn" data-act="teach">Teach a TM${owned.length > 1 ? ` (${shownVariant === "shiny" ? "shiny" : "normal"})` : ""}</button>` : ""}
     </section>
-    ${d.megaForms?.length ? `<section class="dt-sec"><h3>Mega forms</h3><div class="dt-forms">${d.megaForms.map((f) => `<div class="dt-form"><img src="/public/sprites/pokemon/mega/${shownVariant === "shiny" ? "shiny" : "normal"}/${esc(f.id)}.gif" alt=""><b>${esc(f.name)}</b><small>${f.unlocked[shownVariant] ? "Unlocked" : "Locked"}</small></div>`).join("")}</div><p class="dt-muted">Forms of ${esc(d.name)}: they never count as Pokédex entries.</p></section>` : ""}
+    ${d.megaForms?.length ? `<section class="dt-sec"><h3>Mega forms</h3><div class="dt-forms">${d.megaForms.map((f) => `<div class="dt-form"><img src="/public/sprites/pokemon/mega/${shownVariant === "shiny" ? "shiny" : "normal"}/${esc(f.id)}.gif" alt=""><b>${esc(f.name)}</b><small>${f.unlocked[shownVariant] ? "Unlocked" : "Locked"}</small>${f.power50 != null ? `<small>Power at Lv 50: ${f.power50.toLocaleString("en-US")}</small>` : ""}</div>`).join("")}</div><p class="dt-muted">Forms of ${esc(d.name)}: they never count as Pokédex entries.</p></section>` : ""}
     ${dexMode
       ? `${d.baseStats ? `<section class="dt-sec"><h3>Base stats</h3>${statBars(d.baseStats)}<p class="dt-muted">Total ${d.baseTotal}</p></section>` : ""}${learnsetSection(d)}`
       : c ? copyMovesSection(d, c, ctx, opts)

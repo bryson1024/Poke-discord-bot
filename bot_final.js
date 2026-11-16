@@ -484,7 +484,7 @@ import { runCutover } from "./services/fullSimCutover.js";
 import { isFullSimEnabled, markNewPlayer } from "./config/fullSim.js";
 import { settleSimJobs } from "./utils/battle/simPool.js";
 import { showRunResult, challengeNames } from "./utils/battle/playback.js";
-import { powersFromLevels } from "./utils/battle/power.js";
+import { powersFromLevels, powersAtRanked, pokemonPower } from "./utils/battle/power.js";
 import { modulePreloadPages } from "./utils/modulePreload.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2435,6 +2435,11 @@ app.get("/api/user-pokemon", (req, res) => {
     // Read-only: each owned variant's Level and Power (six-stat total, same as /showteam).
     levels,
     powers: powersFromLevels(levels), // { "6:normal": 410 }
+    // Power at Lv 50 per species ({ "6": 534 }): Ranked and wager battles set
+    // every member to RANKED.level, so the Ranked team sorts on this.
+    powers50: powersAtRanked(levels),
+    // Each copy's Power at its own Level ({ uid: 410 }), for the Collection box.
+    copyPowers: Object.fromEntries(allCopies(u).map((c) => [c.uid, pokemonPower(c.id, c.level)]).filter(([, p]) => p != null)),
     // TM system (T5): trained copies per line, for the copy choosers in
     // donate / evolve / shiny craft / Teams. { "6:normal": [{ uid, rev, tmMoves, teams }] }
     trained: trainedSummary(u),
