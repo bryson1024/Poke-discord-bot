@@ -53,7 +53,13 @@ export const ELO = { start: 1000, k: 32 };
 // Levels unchanged; EXP still uses them). `season` resets every ranked
 // record when it changes (owner decision: all ratings reset at launch).
 export const RANKED = { level: 50, season: 1 };
-export const CAPS = { perDay: 10, perOpponent: 3 };
+// defendedPerDay: casual and ranked battles a Defender earns EXP from per
+// UTC day (any Challengers). Being challenged costs the Defender none of
+// their own perDay battles.
+export const CAPS = { perDay: 10, perOpponent: 3, defendedPerDay: 10 };
+// A Defender's EXP in casual and ranked battles (they didn't pick the fight):
+// this share of what the Challenger's formula pays. Wagers pay both in full.
+export const DEFENDER_EXP_MULT = 0.5;
 // minAccountDays / minDex (economy audit 2026-11, D4): both players' Discord
 // accounts must be this old, and both must have this many species
 // registered, since a Wager is the only way CC moves between players.

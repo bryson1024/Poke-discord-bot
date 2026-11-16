@@ -26,8 +26,8 @@ import { isFullSimEnabled } from "../../config/fullSim.js";
 import { cutoverRecord, cutoverMoves } from "../../services/fullSimCutover.js";
 import { getPlan } from "../../services/battlePlans.js";
 import { teamPower, rollSurge, cuteSurgeBoost } from "./power.js";
-import { teamExp, eloUpdate, utcDay, getBattleRecord, getCasualRecord, capBlock, recordStart } from "./rewards.js";
-import { RANKED, CUTE, CAPS } from "./tuning.js";
+import { teamExp, eloUpdate, utcDay, getBattleRecord, getCasualRecord, capBlock, recordStart, canEarnDefending, recordDefended } from "./rewards.js";
+import { RANKED, CUTE, CAPS, DEFENDER_EXP_MULT } from "./tuning.js";
 import { liftRematchBlock } from "./rematch.js";
 import { wagerEligibility } from "./wager.js";
 import { teamCuteness } from "./cuteness.js";
@@ -166,7 +166,10 @@ function applyExp(user, side, result, sideIndex) {
     .filter((k) => k.bySide === sideIndex)
     .map((k) => side.opponent[k.slot]);
   const surged = (m) => (side.levelMult ? { ...m, level: Math.min(100, Math.round(m.level * side.levelMult)) } : m);
-  const base = teamExp({ members: atRealLevels(side.members).map(surged), knockedOut: atRealLevels(knockedOut), won: result.winner === sideIndex });
+  // expMult (a Defender's half share) applies first; held items and events on top.
+  const mult = side.expMult ?? 1;
+  const base = teamExp({ members: atRealLevels(side.members).map(surged), knockedOut: atRealLevels(knockedOut), won: result.winner === sideIndex })
+    .map((g) => (mult === 1 ? g : Math.floor(g * mult)));
   // Lucky Egg: the holder's battle EXP × 1.5, rounded down (Gen 5+). Members
   // without an EXP item keep exactly the same gain as before.
   const gains = base.map((g, i) => Math.floor(g * expMultiplierFor(side.members[i].item)));
@@ -279,10 +282,16 @@ export function runBattle({ trainerData, challengerId, defenderId, mode, rematch
     const winnerId = ids[result.winner];
     const loserId = ids[1 - result.winner];
 
+    // Both sides earn EXP. In casual and ranked battles the Defender earns
+    // DEFENDER_EXP_MULT of it, from up to CAPS.defendedPerDay battles a day; past the Challenger's
+    // Battle cap (an accepted Rematch request) neither side earns.
     const exp = {};
-    const earners = mode === "wager" ? [0, 1] : overCap ? [] : [0];
+    const defenderEarns = mode === "wager" || (!overCap && canEarnDefending(records[1]));
+    if (mode !== "wager" && defenderEarns) recordDefended(records[1]);
+    const earners = overCap ? [] : defenderEarns ? [0, 1] : [0];
     for (const i of earners) {
-      exp[ids[i]] = applyExp(users[i], { members: teams[i], opponent: teams[1 - i], ...(surge?.cute && surge.side === i && { levelMult: surge.levelMult }) }, result, i);
+      const expMult = i === 1 && mode !== "wager" ? DEFENDER_EXP_MULT : 1;
+      exp[ids[i]] = applyExp(users[i], { members: teams[i], opponent: teams[1 - i], expMult, ...(surge?.cute && surge.side === i && { levelMult: surge.levelMult }) }, result, i);
     }
 
     let rating = {};

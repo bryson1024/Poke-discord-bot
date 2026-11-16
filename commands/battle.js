@@ -258,8 +258,9 @@ function startReply(overCap) {
 }
 
 /**
- * The replay, then the Challenger's private EXP card (only they earn EXP in
- * casual and ranked battles; none past the Battle cap, so no card). Never throws.
+ * The replay, then the Challenger's private EXP card (none past the Battle
+ * cap, so no card). The Defender didn't run the command, so their EXP shows
+ * only in the replay's level-up screen and their Battle Records. Never throws.
  */
 export async function replayThenExp(interaction, outcome, challengerId, names, trainerData, { play = playBattle, exp = sendExp } = {}) {
   try {
