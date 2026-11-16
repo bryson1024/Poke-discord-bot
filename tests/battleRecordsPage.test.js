@@ -128,4 +128,13 @@ section("Filters: result, mode, opponent");
   assertEqual(filterRecords(battles, {}, "A"), battles, "no filters: every fight, same order");
 }
 
+section("Your Battle plan (full sim)");
+{
+  // As the server sends it to A (services/fightRecordsApi.js forViewer): only A's plan.
+  const r = { ...battles[0], sides: [{ ...battles[0].sides[0], plan: { id: "setup", name: "Set up & sweep" } }, battles[0].sides[1]] };
+  assertEqual(perspective(r, "A").plan, "Set up & sweep", "the expanded row names your plan");
+  assertTrue(replaySteps(r, "A")[0].caption.endsWith("Your Battle plan: Set up & sweep."), "and so does the replay's first caption");
+  assertEqual([perspective(battles[0], "A").plan, replaySteps(battles[0], "A")[0].caption.includes("Battle plan")], [null, false], "a record without one names none");
+}
+
 finish();

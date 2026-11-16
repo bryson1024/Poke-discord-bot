@@ -10,7 +10,13 @@
 // add their own copy step here, for the same copied keys.
 // ==========================================================
 
-import { chosenMoves, setMoveset, TEAM_TYPES } from "./movesets.js";
+import { chosenMoves, setMoveset, learnableMoves, copyUid, TEAM_TYPES } from "./movesets.js";
+import { copyTraining } from "./box.js";
+// fullSimCutover imports movesets.js, which this module also imports; used only inside functions.
+import { defaultMoves } from "./fullSimCutover.js";
+
+const TEAM_FIELD = { display: "displayedPokemon", battle: "battleTeam" };
+const keyOf = (s) => `${Number(s?.id)}:${s?.variant === "shiny" ? "shiny" : "normal"}`;
 
 const KEY = /^([1-9]\d{0,4}):(normal|shiny)$/;
 export const MAX_COPIED_KEYS = 6;
@@ -35,16 +41,47 @@ export function parseTeamCopy(body, teamType) {
  * Pokémon that is on the saved team, make its moves on team `to` the same as
  * on team `from` (automatic there → automatic here). Pokémon added by hand
  * after the copy are not in copiedKeys and keep their own moves.
+ *
+ * Every slot names one copy (docs/adr/0001), and battles read that copy's
+ * own moves (`u:<uid>`) before the line's. So a slot with a copy gets the
+ * moves of the same copy on the source team (else that line's first source
+ * slot) written to ITS copy; only a slot without a copy uses line moves.
+ * Before 2026-11-15 this copied line moves only, which did nothing for
+ * copies with their own pick.
  * @returns the keys whose moves were copied
  */
 export function applyTeamCopy(user, { from, to, keys }, savedTeam) {
-  const onTeam = new Set((savedTeam ?? []).map((s) => `${Number(s.id)}:${s.variant === "shiny" ? "shiny" : "normal"}`));
+  const wanted = new Set(keys);
+  const source = Array.isArray(user?.[TEAM_FIELD[from]]) ? user[TEAM_FIELD[from]].filter((s) => s && typeof s === "object") : [];
   const done = [];
-  for (const key of keys) {
-    if (!onTeam.has(key)) continue;
-    const [id, variant] = key.split(":");
-    setMoveset(user, to, Number(id), variant, chosenMoves(user, from, Number(id), variant));
-    done.push(key);
+  for (const slot of savedTeam ?? []) {
+    const key = keyOf(slot);
+    if (!wanted.has(key)) continue;
+    const id = Number(slot.id);
+    const variant = slot.variant === "shiny" ? "shiny" : "normal";
+    const toUid = copyUid(user, id, variant, slot.uid ?? null);
+    if (!toUid) {
+      // An older slot without a copy: the line's moves, as before.
+      if (!done.includes(key)) setMoveset(user, to, id, variant, chosenMoves(user, from, id, variant));
+    } else {
+      const src = source.find((s) => s.uid && s.uid === slot.uid) ?? source.find((s) => keyOf(s) === key);
+      const fromUid = src ? copyUid(user, id, variant, src.uid ?? null) : null;
+      const moves = chosenMoves(user, from, id, variant, { uid: fromUid });
+      if (moves) setMoveset(user, to, id, variant, moves, { uid: toUid });
+      else {
+        // Automatic on the source → automatic here. If a line pick on this
+        // team would then apply instead, pin the moves it fights with on the
+        // source, so the two teams still match.
+        setMoveset(user, to, id, variant, null, { uid: toUid });
+        if (chosenMoves(user, to, id, variant, { uid: toUid })) {
+          const level = copyTraining(user, fromUid ?? toUid)?.level;
+          const allowed = new Set(learnableMoves(user, id, variant, { uid: toUid }).map((m) => m.id));
+          const auto = defaultMoves(user, { id, variant, uid: fromUid ?? toUid }, level).filter((m) => allowed.has(m));
+          if (auto.length) setMoveset(user, to, id, variant, auto, { uid: toUid });
+        }
+      }
+    }
+    if (!done.includes(key)) done.push(key);
   }
   return done;
 }
