@@ -20,11 +20,11 @@ const player = (cc = 50000) => ({ cc, items: { evolution_stone: 0 }, pokemon: { 
 section("catalog items and approved prices (D-T6)");
 {
   const tms = listCatalog().filter((i) => i.category === "tm");
-  assertEqual(tms.length, 272, "one item per catalog move (156 launch + 115 full-sim + 1 held)");
-  assertEqual(tms.filter((i) => i.status === "active").length, 271, "271 active");
+  assertEqual(tms.length, 275, "one item per catalog move (156 launch + 118 full-sim + 1 held)");
+  assertEqual(tms.filter((i) => i.status === "active").length, 274, "274 active");
   assertEqual(sellableTms(OFF).length, 156, "full sim off: the shop sells the 156 launch TMs only");
-  assertEqual(sellableTms({ FULL_SIM_ENABLED: "1" }).length, 271, "full sim on: launch + full-sim TMs");
-  assertEqual(tms.filter((i) => i.tm.fullSim).length, 115, "full-sim TMs are marked");
+  assertEqual(sellableTms({ FULL_SIM_ENABLED: "1" }).length, 274, "full sim on: launch + full-sim TMs");
+  assertEqual(tms.filter((i) => i.tm.fullSim).length, 118, "full-sim TMs are marked");
   assertTrue(tmMoveIds().every((m) => tmTierOf(m)), "every catalog move has an explicit price tier");
   assertEqual(TM_PRICE_BY_TIER, { basic: 1500, standard: 3000, power: 5000, premium: 6000, elite: 7500 }, "tier prices");
   const price = (m) => getCatalogItem(`tm_${m}`).shop.price.cc;
@@ -35,8 +35,8 @@ section("catalog items and approved prices (D-T6)");
   assertTrue(!grantItem(player(), "tm_terablast", 1).ok, "grantItem refuses a held TM");
   assertEqual(getCatalogItem("tm_hiddenpower"), null, "moves outside the catalog have no item");
   const draft = (m) => [getCatalogItem(`tm_${m}`).shop.tier, getCatalogItem(`tm_${m}`).shop.price.cc];
-  assertEqual([draft("swordsdance"), draft("toxic"), draft("protect"), draft("charm"), draft("closecombat"), draft("frostbreath"), draft("dracometeor"), draft("knockoff")],
-    [["premium", 6000], ["premium", 6000], ["standard", 3000], ["basic", 1500], ["elite", 7500], ["premium", 6000], ["power", 5000], ["standard", 3000]], "draft prices: status rule and re-tiered former holds");
+  assertEqual([draft("swordsdance"), draft("toxic"), draft("protect"), draft("charm"), draft("closecombat"), draft("frostbreath"), draft("dracometeor"), draft("knockoff"), draft("explosion"), draft("selfdestruct"), draft("mistyexplosion")],
+    [["premium", 6000], ["premium", 6000], ["standard", 3000], ["basic", 1500], ["elite", 7500], ["premium", 6000], ["power", 5000], ["standard", 3000], ["power", 5000], ["power", 5000], ["standard", 3000]], "draft prices: status rule and re-tiered former holds");
   assertEqual(getCatalogItem("tm_swordsdance").tm.power, null, "status moves have no power");
   assertEqual(CATEGORIES.tm?.label, "Technical Machines", "new bag category");
   const bag = player(); grantItem(bag, "tm_thunderbolt", 2);

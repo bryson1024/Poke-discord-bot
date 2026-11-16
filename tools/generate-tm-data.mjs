@@ -8,10 +8,11 @@
 // Catalog (owner decisions D-T4/D-T5/D-T5b, 2026-11-10: the broad catalog
 // "R-B"; docs/tm-system in the TM audit):
 //   • LAUNCH (156): damaging moves the legacy battle engine already models.
-//   • FULLSIM (115, owner 2026-11-16, price draft "TM Price Draft"): moves
+//   • FULLSIM (118, owner 2026-11-16, price draft "TM Price Draft"): moves
 //     only Showdown's engine plays correctly: the 15 former held moves plus
-//     Gyro Ball and Grass Knot, 35 damaging moves (variable power, fixed
-//     damage, two-turn, recharge) and 63 status moves. Sold and usable only
+//     Gyro Ball and Grass Knot, 38 damaging moves (variable power, fixed
+//     damage, two-turn, recharge, and the three that make the user faint)
+//     and 63 status moves. Sold and usable only
 //     while FULL_SIM_ENABLED is on (utils/battle/tmData.js tmMoveAvailable);
 //     checked against data/battle/full-sim-data.json, not battleData.json.
 //   • HOLD (1): Tera Blast (no Terastal, so it would only ever be Normal).
@@ -55,7 +56,7 @@ acidspray aircutter airslash assurance aurasphere avalanche blazekick bodyslam b
 // Full sim only (owner 2026-11-16). Former holds first, then new damaging
 // moves, then status moves.
 const FULLSIM = `acrobatics bodypress closecombat dracometeor falseswipe foulplay frostbreath knockoff leafstorm outrage overheat psyshock superpower tripleaxel uproar gyroball grassknot
-lowkick heavyslam heatcrash electroball reversal hardpress endeavor superfang nightshade focuspunch upperhand poltergeist futuresight hex storedpower weatherball dreameater snore steelbeam meteorbeam solarbeam solarblade dig dive fly bounce phantomforce hyperbeam gigaimpact frenzyplant blastburn hydrocannon grasspledge firepledge waterpledge
+lowkick heavyslam heatcrash electroball reversal hardpress endeavor superfang nightshade focuspunch upperhand poltergeist futuresight hex storedpower weatherball dreameater snore steelbeam meteorbeam solarbeam solarblade dig dive fly bounce phantomforce hyperbeam gigaimpact frenzyplant blastburn hydrocannon grasspledge firepledge waterpledge explosion selfdestruct mistyexplosion
 swordsdance nastyplot dragondance calmmind bulkup toxic willowisp stealthrock thunderwave protect substitute roost rest painsplit trickroom tailwind spikes toxicspikes reflect lightscreen auroraveil raindance sunnyday sandstorm snowscape grassyterrain electricterrain psychicterrain mistyterrain taunt encore agility rockpolish irondefense amnesia cosmicpower curse workup honeclaws batonpass haze
 charm screech scaryface faketears featherdance metalsound eerieimpulse confide confuseray endure sleeptalk focusenergy charge torment roar imprison spite psychup safeguard trick skillswap metronome`.split(/\s+/);
 

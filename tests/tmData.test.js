@@ -15,14 +15,14 @@ const raw = JSON.parse(fs.readFileSync(new URL("../data/battle/tm-data.json", im
 
 section("catalog shape");
 assertEqual(tmMoveIds({ status: "launch" }).length, 156, "156 launch moves (owner decision D-T4, R-B)");
-assertEqual(tmMoveIds({ status: "fullsim" }).length, 115, "115 full-sim moves (owner's TM Price Draft, 2026-11-16)");
+assertEqual(tmMoveIds({ status: "fullsim" }).length, 118, "118 full-sim moves (owner's TM Price Draft + the three self-KO moves, 2026-11-16)");
 assertEqual(tmMoveIds({ status: "hold" }), ["terablast"], "only Tera Blast is held (no Terastal)");
-assertEqual(tmDataCounts(), { launch: 156, fullsim: 115, hold: 1, species: 1025 }, "counts header matches");
+assertEqual(tmDataCounts(), { launch: 156, fullsim: 118, hold: 1, species: 1025 }, "counts header matches");
 assertTrue(tmMoveIds().filter((id) => raw.moves[id].status !== "fullsim").every((id) => getMove(id)), "launch and held moves exist in battleData.json");
 assertTrue(tmMoveIds({ status: "fullsim" }).every((id) => getMove(id, FULL)), "full-sim moves exist in the full sim's data");
 assertTrue(tmMoveIds({ status: "launch" }).every((id) => getMove(id).category !== "Status"), "no status move is a launch (legacy-engine) TM");
-assertEqual(["swordsdance", "toxic", "protect", "stealthrock", "solarbeam", "hyperbeam", "hex", "lowkick", "closecombat", "knockoff"].map((id) => tmMove(id)?.status), Array(10).fill("fullsim"), "status, two-turn, recharge, variable-power and former held moves are full-sim TMs");
-for (const banned of ["hiddenpower", "return", "frustration", "fling", "explosion", "selfdestruct", "secretpower", "payday", "doubleteam", "swagger", "attract", "hail", "helpinghand", "allyswitch", "quash", "beatup"]) {
+assertEqual(["swordsdance", "toxic", "protect", "stealthrock", "solarbeam", "hyperbeam", "hex", "lowkick", "closecombat", "knockoff", "explosion", "selfdestruct", "mistyexplosion"].map((id) => tmMove(id)?.status), Array(13).fill("fullsim"), "status, two-turn, recharge, variable-power and former held moves are full-sim TMs");
+for (const banned of ["hiddenpower", "return", "frustration", "fling", "secretpower", "payday", "doubleteam", "swagger", "attract", "hail", "helpinghand", "allyswitch", "quash", "beatup"]) {
   assertEqual(tmMove(banned), null, `${banned} is not in the catalog`);
 }
 assertTrue(tmMoveIds().every((id) => raw.moves[id].species.every((n) => Number.isInteger(n) && n >= 1 && n <= 1025 && getSpecies(n))), "every learner is a real species #1–1025");
