@@ -941,7 +941,7 @@ async function refreshCopies() {
 }
 
 // ---------- Pokémon details (the Collection's drawer) ----------
-const collectionHref = (id, variant) => `/public/picker-pokemon/?${new URLSearchParams({ id: userId, pokemon: id, variant })}`;
+const collectionHref = (id, variant, uid = null) => `/public/picker-pokemon/?${new URLSearchParams({ id: userId, pokemon: id, variant, ...(uid ? { copy: uid } : {}) })}`;
 const apiJSON = async (url) => {
   const res = await fetch(url, { credentials: "same-origin" });
   let body = {};
@@ -973,10 +973,11 @@ function openTeamDetails(t, i) {
         const slot = { id: d.id, variant, ...(variant === s.variant && s.uid ? { uid: s.uid } : {}) };
         openMovesEditor({ userId, team: t, s: slot, name: species(d.id).name, recommended: recommendedFor(state.plans, t, slot), onSaved: () => refreshPlans(), onTaught: () => { refreshCopies(); refreshPlans(); } });
       }
-      else if (act === "collection") leaveTo(collectionHref(d.id, variant));
+      else if (act === "collection") leaveTo(collectionHref(d.id, variant, variant === s.variant ? s.uid : null));
     },
   }, {
     variant: s.variant,
+    uid: s.uid ?? null, // this slot's copy: its Level and equipped moves (what it battles with)
     level: t === "battle" ? "50" : "real",
     slotsFor: slotsOnScreen(s.id),
     megaName: s.mega && state.megaOn ? slotName(s) : null,
