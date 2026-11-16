@@ -48,7 +48,7 @@ export function getBattleRecord(user, day) {
     if ((b.wins ?? 0) + (b.losses ?? 0) > 0) (b.past ??= []).push({ season: b.season ?? 0, rating: b.rating, wins: b.wins, losses: b.losses });
     Object.assign(b, { rating: ELO.start, wins: 0, losses: 0, season: RANKED.season });
   }
-  if (b.day !== day) Object.assign(b, { day, started: 0, vs: {} });
+  if (b.day !== day) Object.assign(b, { day, started: 0, vs: {}, defended: 0 });
   return b;
 }
 
@@ -86,6 +86,13 @@ export function capBlock(record, opponentId, fx = liveEffects()) {
   if (record.started >= dailyCap(fx)) return "daily";
   if ((record.vs[opponentId] ?? 0) >= CAPS.perOpponent) return "opponent";
   return null;
+}
+
+// Casual and ranked battles a Defender earns EXP from: CAPS.defendedPerDay a
+// UTC day, so a ring of accounts challenging one player can't farm EXP for it.
+export const canEarnDefending = (record) => (record.defended ?? 0) < CAPS.defendedPerDay;
+export function recordDefended(record) {
+  record.defended = (record.defended ?? 0) + 1;
 }
 
 export function recordStart(record, opponentId) {

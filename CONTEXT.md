@@ -227,7 +227,7 @@ A numbered period of ranked play. A new **Season** starts every player's **Ranke
 _Avoid_: ladder reset, split
 
 **Battle cap**:
-The limit on how many **Battles** a player may start per UTC day, across all three kinds together and against any one **Defender**. Past either limit, **Ranked battles** and **Wager battles** can't start. Past the daily limit, a **Casual battle** still runs but earns no rewards. Past the per-**Defender** limit, it needs a **Rematch request** first.
+The limit on how many **Battles** a player may start per UTC day, across all three kinds together and against any one **Defender**. Past either limit, **Ranked battles** and **Wager battles** can't start. Past the daily limit, a **Casual battle** still runs but earns no rewards. Past the per-**Defender** limit, it needs a **Rematch request** first. Being challenged never uses a **Defender's** own **Battle cap**; a **Defender** earns half EXP from up to 10 **Casual** and **Ranked battles** a UTC day, and none from a **Rematch request**.
 _Avoid_: stamina, energy, battle limit
 
 **Power rating**:
