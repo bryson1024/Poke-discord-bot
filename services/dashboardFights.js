@@ -64,12 +64,14 @@ export function battleRefusalText(reason, opponentId, name) {
   if (reason === "rematch_needed") return "3 battles with them today. Ask for a rematch with /battle.";
   if (reason === "busy") return "You're already in a fight.";
   if (reason === "no_defender") return "That player hasn't started playing yet.";
+  if (reason === "fight_failed") return "The fight couldn't run. Try again.";
   return plainText(battleRefusal(reason, opponentId), { [opponentId]: name });
 }
 
 export function challengeRefusalText(reason, user) {
   if (reason === "busy") return "You're already in a fight.";
   if (reason === "no_preview") return "That preview expired. Open the Challenge again.";
+  if (reason === "fight_failed") return "The fight couldn't run. Try again.";
   return challengeRefusal(reason, user);
 }
 
@@ -237,6 +239,13 @@ export function createDashboardFights({
     };
   }
 
+  // The full sim's worker can fail a fight (crash, out of memory); the runners
+  // leave nothing half done, so the player only needs telling.
+  const fightFailed = (err) => {
+    console.warn("⚠️ dashboard fight failed:", err?.message || err);
+    return { ok: false, reason: "fight_failed" };
+  };
+
   const handlers = {
     /** GET /api/battle/enabled: whether the Battle nav item shows. No session needed. */
     enabledView(_req, res) {
@@ -352,14 +361,15 @@ export function createDashboardFights({
         const outcome = await withBothLocks(lockUser, id, defenderId, async () => {
           const live = getTrainerData();
           const before = vsRecords(live, [id, defenderId], mode);
-          const out = runBattle({ trainerData: live, challengerId: id, defenderId, mode, seed, now: now() });
+          // Awaited under the lock: a Promise from the sim worker under the full sim.
+          const out = await runBattle({ trainerData: live, challengerId: id, defenderId, mode, seed, now: now() });
           if (out.ok) {
             out.vsRecords = before;
             await save(); // saved before the replay, as /battle does
           }
           return out;
-        });
-        if (!outcome.ok) return refuse(outcome.reason);
+        }).catch(fightFailed);
+        if (!outcome.ok) return refuse(outcome.reason, outcome.reason === "fight_failed" ? 503 : 409);
 
         logEvent("battle", id, {
           defenderId, mode, seed, winnerId: outcome.winnerId, turns: outcome.result.turns, surge: !!outcome.surge, via: "dashboard",
@@ -439,13 +449,15 @@ export function createDashboardFights({
           const atStake = live && previewChallenge(live, key);
           const card = live && cardView(key, atStake, live, playerName, pick);
           const seed = randomInt(0, 2 ** 31 - 1);
-          const out = isRun
+          // Awaited under the lock: a Promise from the sim worker under the full sim.
+          // Unawaited, the page refused while the fight still ran and spent the attempt.
+          const out = await (isRun
             ? startRun({ trainerData: getTrainerData(), userId: id, seed, maxLoss: shown.loss, channelId: t.id ?? null, pick, now: now() })
-            : runChallenge({ trainerData: getTrainerData(), userId: id, key, seed, maxLoss: shown.loss, pick, now: now() });
+            : runChallenge({ trainerData: getTrainerData(), userId: id, key, seed, maxLoss: shown.loss, pick, now: now() }));
           if (out.ok) await save();
           return { ...out, atStake, card };
-        });
-        if (!first.ok) return refuse(first.reason);
+        }).catch(fightFailed);
+        if (!first.ok) return refuse(first.reason, first.reason === "fight_failed" ? 503 : 409);
 
         const trainer = first.card?.player.trainerFile ?? null;
         const aura = first.card?.player.tier;

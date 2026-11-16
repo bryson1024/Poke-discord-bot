@@ -297,6 +297,33 @@ section("Challenge preview: trainers, Auras and parties");
   assertEqual(previewTrainers("elite4", {}, "x").trainers.map((t) => t.aura?.id), ["e4Lorelei", "e4Bruno", "e4Agatha", "e4Lance"], "each Elite Four member shows their own Aura");
 }
 
+section("Full sim: the page waits for the fight (2026-11-16 Koga bug)");
+{
+  // Under the full sim the runners return a Promise. Unawaited, the page
+  // said "can't happen right now" while the fight ran on and spent the attempt.
+  process.env.FULL_SIM_ENABLED = "1";
+  process.env.SIM_THREADS = "0";
+  try {
+    const h = harness();
+    await h.call("challengePreview", { query: { id: A, key: "koga" } });
+    const res = await h.call("startChallenge", { body: { id: A, key: "koga", pick: "ranked" } });
+    assertEqual([res.status, res.body.ok, res.body.reason], [200, true, undefined], "a Ranked-team Koga challenge runs");
+    assertEqual(res.body.result?.kind, "challenge", "and returns its result");
+    assertEqual(h.trainerData[A].challenge.attempts, 1, "one attempt spent, for a fight the player saw");
+    assertTrue(h.log.saves >= 1, "saved before the replay");
+    assertEqual(h.log.records.length, 1, "a Fight record was kept");
+    assertEqual(h.log.challenges.map((c) => c.ch), ["dash"], "and the replay posted");
+
+    const b = await h.call("startBattle", { body: { id: A, defenderId: B, mode: "ranked" } });
+    assertEqual([b.status, b.body.ok], [200, true], "a Ranked battle runs too");
+    assertTrue(!!h.log.battles[0]?.outcome.vsRecords, "with the VS records taken before it");
+    assertEqual(h.log.saves >= 2, true, "and is saved before its replay");
+  } finally {
+    delete process.env.FULL_SIM_ENABLED;
+    delete process.env.SIM_THREADS;
+  }
+}
+
 section("A Defender's team");
 {
   const h = harness();
