@@ -154,7 +154,7 @@ function render(d, ctx, opts) {
       }).join("")}
       <section class="dt-sec"><p class="dt-muted" style="margin:0">${c.nextMoves.length ? `Learns next: ${c.nextMoves.map((m) => esc(m.name)).join(", ")}. ` : ""}${ctx.actionsHTML ? "Each team keeps its own moves." : `Change moves on the <a href="${pageHref("/public/teams/", ctx.userId)}">Teams page</a> (each team keeps its own).`}</p></section>`
     : d.baseStats ? `<section class="dt-sec"><h3>Base stats</h3>${statBars(d.baseStats)}<p class="dt-muted">Total ${d.baseTotal}</p></section>` : ""}
-    ${evo.length > 1 ? `<section class="dt-sec"><h3>Evolution</h3><div class="dt-evo">${evo.map((e) => `<button type="button" class="dt-evo-step${e.rel === "this" ? " is-this" : ""}" data-species="${e.id}"${e.rel === "this" ? ' aria-current="true"' : ""}><img src="/public/sprites/pokemon/normal/${e.id}.gif" alt="">${esc(e.name)}</button>`).join('<span aria-hidden="true">›</span>')}</div></section>` : ""}
+    ${evo.length > 1 && !isSpecial(shownVariant) ? `<section class="dt-sec"><h3>Evolution</h3><div class="dt-evo">${evo.map((e) => `<button type="button" class="dt-evo-step${e.rel === "this" ? " is-this" : ""}" data-species="${e.id}"${e.rel === "this" ? ' aria-current="true"' : ""}><img src="/public/sprites/pokemon/normal/${e.id}.gif" alt="">${esc(e.name)}</button>`).join('<span aria-hidden="true">›</span>')}</div></section>` : ""}
     ${actions ? `<section class="dt-sec dt-actions">${actions}</section>` : ""}`;
   scanFx(dialog);
 }

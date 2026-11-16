@@ -802,9 +802,12 @@ function renderBoxTiles(container) {
     el.dataset.uid = c.uid;
     const stone = (src, n) => `<div class="evolve-cost" style="bottom:6px;right:6px;"><img src="${src}" style="width:16px;height:16px;vertical-align:middle;image-rendering:pixelated;" alt="">${n}</div>`;
     let badge = "";
-    if (currentMode === "donate") badge = `<div class="donate-value" title="Donation value in CC"><img src="/public/sprites/items/cc_coin.png" alt="">${fmtCC(getDonationValue(c.tier, c.shiny))}</div>`;
-    if (currentMode === "convert" && dustCostForTier(c.tier) > 0) badge = stone("/public/sprites/items/shiny_dust.png", dustCostForTier(c.tier));
-    if (currentMode === "evolve" && minEvolutionCostFor(c.id) > 0) badge = stone("/public/sprites/items/evolution_stone.png", minEvolutionCostFor(c.id));
+    // A Special copy (the Squirtle Squad Leader) is locked in every action mode, so it has no value or cost to show.
+    if (!c.special) {
+      if (currentMode === "donate") badge = `<div class="donate-value" title="Donation value in CC"><img src="/public/sprites/items/cc_coin.png" alt="">${fmtCC(getDonationValue(c.tier, c.shiny))}</div>`;
+      if (currentMode === "convert" && dustCostForTier(c.tier) > 0) badge = stone("/public/sprites/items/shiny_dust.png", dustCostForTier(c.tier));
+      if (currentMode === "evolve" && minEvolutionCostFor(c.id) > 0) badge = stone("/public/sprites/items/evolution_stone.png", minEvolutionCostFor(c.id));
+    }
     const teamBadge = onTeams.length
       ? `<div class="team-badges">${onTeams.map((t) => `<span class="mem mem-${t[0].toLowerCase()}" title="On your ${t} team">${t[0]}</span>`).join("")}</div>`
       : "";

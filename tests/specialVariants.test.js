@@ -485,6 +485,20 @@ section("dashboard");
   assertEqual(publicSprites.specialSprite?.("squad-leader", "grayscale"), "/public/sprites/pokemon/special/grayscale/squad-leader.gif", "specialSprite builds the grayscale path");
   assertEqual([publicSprites.rowVariant?.(["c", 7, 0, 1, 0, 0, 0, 0, "squad-leader"]), publicSprites.rowVariant?.(["c", 7, 1, 1, 0, 0, 0, 0, null]), publicSprites.rowVariant?.(["c", 7, 0, 1, 0, 0, 0, 0])], ["squad-leader", "shiny", "normal"], "rowVariant reads a copy row's Variant (older 8-field rows too)");
 }
+{
+  // The Leader never evolves, is never donated and never turns shiny, so the
+  // dashboard shows no evolution line or costs for it. These page scripts run
+  // only in the browser (root-absolute imports), so, like
+  // tests/bulkRules.test.js, this reads their source.
+  const src = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
+  const evoLine = src("public/picker-pokemon/detail.js").split("\n").find((l) => l.includes("<h3>Evolution</h3>")) ?? "";
+  assertTrue(/evo\.length > 1 && !isSpecial\(shownVariant\)/.test(evoLine), "the details drawer hides the Evolution line while the Leader's copy is shown");
+  const picker = src("public/picker-pokemon/script.js");
+  const start = picker.indexOf("const tile = (c) =>");
+  const badges = picker.slice(picker.indexOf("let badge", start), picker.indexOf("const teamBadge", start));
+  const guard = badges.indexOf("if (!c.special) {");
+  assertTrue(guard >= 0 && ["donate-value", "shiny_dust.png", "evolution_stone.png"].every((b) => badges.indexOf(b) > guard), "the Leader's Collection tile shows no CC, Dust or stone badge");
+}
 
 section("final review");
 {
