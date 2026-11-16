@@ -19,8 +19,10 @@
 //            megaName:  set when the slot battles as a Mega form
 //            uid:       the copy to show (a Teams slot, a Collection box
 //                       tile): its Level, stats, equipped moves and Ability per team
-//            mode:      "dex" (Pokédex): base stats and every move it can
-//                       learn (level-up / TM filter) instead of equipped moves
+//            mode:      "dex" (Pokédex): base stats instead of the copy's
+//                       stats and equipped moves
+// Every drawer (Teams, Collection, Pokédex) lists the moves the species can
+// learn (level-up Levels, TMs while TM_ENABLED) with a filter.
 // The move choices are public/picker-pokemon/detailMoves.js.
 // ==========================================================
 
@@ -134,7 +136,7 @@ function copyMovesSection(d, line, ctx, opts) {
     <section class="dt-sec"><p class="dt-muted" style="margin:0">${next.length ? `Learns next: ${next.map((m) => esc(m.name)).join(", ")}. ` : ""}${ctx.actionsHTML ? "Each team keeps its own moves and ability." : `Change moves and ability on the <a href="${pageHref("/public/teams/", ctx.userId)}">Teams page</a> (each team keeps its own).`}</p></section>`;
 }
 
-// Pokédex: every move the species can learn, with a Level-up / TM filter.
+// Every move the species can learn, with a Level-up / TM filter (all drawers).
 function learnsetSection(d) {
   const ls = d.learnset ?? { levelUp: [], tm: [] };
   const hasTm = ls.tm.length > 0;
@@ -183,8 +185,8 @@ function render(d, ctx, opts) {
     ${d.megaForms?.length ? `<section class="dt-sec"><h3>Mega forms</h3><div class="dt-forms">${d.megaForms.map((f) => `<div class="dt-form"><img src="/public/sprites/pokemon/mega/${shownVariant === "shiny" ? "shiny" : "normal"}/${esc(f.id)}.gif" alt=""><b>${esc(f.name)}</b><small>${f.unlocked[shownVariant] ? "Unlocked" : "Locked"}</small>${f.power50 != null ? `<small>Power at Lv 50: ${f.power50.toLocaleString("en-US")}</small>` : ""}</div>`).join("")}</div><p class="dt-muted">Forms of ${esc(d.name)}: they never count as Pokédex entries.</p></section>` : ""}
     ${dexMode
       ? `${d.baseStats ? `<section class="dt-sec"><h3>Base stats</h3>${statBars(d.baseStats)}<p class="dt-muted">Total ${d.baseTotal}</p></section>` : ""}${learnsetSection(d)}`
-      : c ? copyMovesSection(d, c, ctx, opts)
-      : d.baseStats ? `<section class="dt-sec"><h3>Base stats</h3>${statBars(d.baseStats)}<p class="dt-muted">Total ${d.baseTotal}</p></section>` : ""}
+      : c ? `${copyMovesSection(d, c, ctx, opts)}${learnsetSection(d)}`
+      : `${d.baseStats ? `<section class="dt-sec"><h3>Base stats</h3>${statBars(d.baseStats)}<p class="dt-muted">Total ${d.baseTotal}</p></section>` : ""}${learnsetSection(d)}`}
     ${evo.length > 1 ? `<section class="dt-sec"><h3>Evolution</h3><div class="dt-evo">${evo.map((e) => `<button type="button" class="dt-evo-step${e.rel === "this" ? " is-this" : ""}" data-species="${e.id}"${e.rel === "this" ? ' aria-current="true"' : ""}><img src="/public/sprites/pokemon/normal/${e.id}.gif" alt="">${esc(e.name)}</button>`).join('<span aria-hidden="true">›</span>')}</div></section>` : ""}
     ${actions ? `<section class="dt-sec dt-actions">${actions}</section>` : ""}`;
   scanFx(dialog);
