@@ -27,7 +27,7 @@
 import { scanFx } from "/public/shared/spriteFx.js";
 import { pageHref } from "/public/shared/shell.js";
 import { openTeachDialog } from "/public/shared/teachTm.js";
-import { moveMeta } from "/public/shared/moveMeta.js";
+import { moveMeta, moveDescLine } from "/public/shared/moveMeta.js";
 import { pickCopy, equippedMoves, equippedAbility, learnsetRows, learnLabel } from "/public/picker-pokemon/detailMoves.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -129,7 +129,7 @@ function copyMovesSection(d, line, ctx, opts) {
       const { auto, moves } = equippedMoves(line, copy, team);
       const ab = equippedAbility(line, copy, team);
       const abLine = ab ? `<div class="dt-ability"><span class="dt-ability-name">Ability: <b>${esc(ab.name)}</b>${ab.only ? "" : ` <small class="dt-muted">${ab.auto ? "automatic" : "chosen"}</small>`}</span>${ab.desc ? `<small class="dt-muted">${esc(ab.desc)}</small>` : ""}</div>` : "";
-      return `<section class="dt-sec"><h3>${team === "battle" ? "Ranked team moves" : "Casual team moves"}${auto ? " · automatic" : ""}</h3><div class="dt-moves">${moves.map((m) => `<div class="dt-move"><span>${esc(m.name)}${moveMeta(m)}</span></div>`).join("")}</div>${abLine}</section>`;
+      return `<section class="dt-sec"><h3>${team === "battle" ? "Ranked team moves" : "Casual team moves"}${auto ? " · automatic" : ""}</h3><div class="dt-moves">${moves.map((m) => `<div class="dt-move"><span>${esc(m.name)}${moveMeta(m)}${moveDescLine(m)}</span></div>`).join("")}</div>${abLine}</section>`;
     }).join("")}
     <section class="dt-sec"><p class="dt-muted" style="margin:0">${next.length ? `Learns next: ${next.map((m) => esc(m.name)).join(", ")}. ` : ""}${ctx.actionsHTML ? "Each team keeps its own moves and ability." : `Change moves and ability on the <a href="${pageHref("/public/teams/", ctx.userId)}">Teams page</a> (each team keeps its own).`}</p></section>`;
 }
@@ -144,7 +144,7 @@ function learnsetSection(d) {
   const total = learnsetRows(ls, "all").length;
   const filters = hasTm ? `<div class="dt-lvseg dt-learnseg" role="group" aria-label="Show moves">${btn("all", "All", total)}${btn("level", "Level-up", ls.levelUp.length)}${btn("tm", "TM", ls.tm.length)}</div>` : "";
   return `<section class="dt-sec"><div class="dt-sec-head"><h3>Moves it can learn</h3>${filters}</div>
-    ${rows.length ? `<ul class="dt-learnset">${rows.map((m) => `<li class="dt-move"><span>${esc(m.name)}${moveMeta(m)}</span><small class="dt-learnat">${esc(learnLabel(m, learnFilter))}</small></li>`).join("")}</ul>` : `<p class="dt-muted">No moves to show.</p>`}
+    ${rows.length ? `<ul class="dt-learnset">${rows.map((m) => `<li class="dt-move"><span>${esc(m.name)}${moveMeta(m)}${moveDescLine(m)}</span><small class="dt-learnat">${esc(learnLabel(m, learnFilter))}</small></li>`).join("")}</ul>` : `<p class="dt-muted">No moves to show.</p>`}
     ${hasTm ? "" : `<p class="dt-muted">Level-up moves only.</p>`}</section>`;
 }
 

@@ -56,11 +56,15 @@ export function toggleMove(state, copy, id, on) {
 export const savedMoves = (state) => (state.auto ? null : state.picked);
 export const canSave = (state) => state.auto || state.picked.length > 0;
 
-/** One row of the move list. meta: the move's details as HTML (public/shared/moveMeta.js). */
-export function moveRow(m, { on, full, recommended, meta }) {
+/**
+ * One row of the move list. meta: the move's details as HTML
+ * (public/shared/moveMeta.js); details: the line saying what it does
+ * (moveDescLine), "" without.
+ */
+export function moveRow(m, { on, full, recommended, meta, details = "" }) {
   const locked = !on && full;
   return `<li><label class="tm-move${on ? " is-on" : ""}${locked ? " is-full" : ""}${recommended ? " is-rec" : ""}">
     <input type="checkbox" value="${esc(m.id)}"${on ? " checked" : ""}${locked ? " disabled" : ""}>
-    <span class="tm-move-name">${esc(m.name)}${meta}</span>${recommended ? `<span class="tm-move-rec">Recommended</span>` : ""}
+    <span class="tm-move-name">${esc(m.name)}${meta}${details}</span>${recommended ? `<span class="tm-move-rec">Recommended</span>` : ""}
   </label></li>`;
 }

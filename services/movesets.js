@@ -26,6 +26,7 @@ import { getSpecies, getMove } from "../utils/battle/data.js";
 import { isFullSimEnabled } from "../config/fullSim.js";
 import { getTraining } from "../utils/training.js";
 import { movesLearned } from "../utils/battle/moveset.js";
+import { moveDetails } from "../utils/battle/moveText.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
 import { copyTraining } from "./box.js";
 // fullSimCutover imports this module back; each uses the other only inside functions.
@@ -176,8 +177,9 @@ export function keepMovesOnLevelUp(user, speciesId, variant, { uid = null, fromL
   return pinned;
 }
 
-/** Display info for a move id. */
+/** Display info for a move id, with what it does (desc), accuracy (acc) and priority. */
 export function moveInfo(moveId) {
   const m = getMove(moveId);
-  return m ? { id: moveId, name: m.name, type: m.type ?? null, power: m.power ?? null, category: m.category ?? null } : { id: moveId, name: String(moveId), type: null, power: null, category: null };
+  // desc/acc/priority: what it does, for the dashboard's ⓘ (utils/battle/moveText.js).
+  return m ? { id: moveId, name: m.name, type: m.type ?? null, power: m.power ?? null, category: m.category ?? null, ...moveDetails(moveId, m) } : { id: moveId, name: String(moveId), type: null, power: null, category: null, ...moveDetails(moveId, null) };
 }
