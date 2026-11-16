@@ -10,8 +10,8 @@
 // the same response are only the fallback stored before copies had their
 // own, and showing them made saved moves look unsaved (2026-11-15).
 //
-// The Pokédex drawer shows every move the species can learn instead:
-// level-up moves with their Levels, and TMs, with a filter.
+// Every drawer (Pokédex, Teams, Collection) also lists every move the
+// species can learn: level-up moves with their Levels, and TMs, with a filter.
 // ==========================================================
 
 const onTeam = (c) => (c?.teams?.display || c?.teams?.battle ? 1 : 0);
