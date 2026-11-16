@@ -2,14 +2,15 @@
 // public/battle/script.js — the Battle page.
 // Starts Casual and Ranked battles and Challenges (services/dashboardFights.js).
 // The server posts each fight to Discord as /battle or /challenge would;
-// this page shows the result, where it was posted, and a link to the
-// replay in Battle Records. An Elite Four run is polled while it plays, and
+// this page plays the fight first (Battle Records' replay viewer), then
+// shows the result, where it was posted, and a link to the replay. An Elite Four run is polled while it plays, and
 // the Revive pick is made here.
 // ==========================================================
 
 import { playerId, pageHref, showExpired, toast } from "/public/shared/shell.js";
 import { scanFx } from "/public/shared/spriteFx.js";
 import { auraPreview, loadAuraLooks, startAuraPreviews } from "/public/shared/auraPreview.js";
+import { openReplay } from "/public/battlerecords/replay.js";
 
 const id = playerId();
 const $ = (sel) => document.getElementById(sel);
@@ -220,7 +221,7 @@ document.addEventListener("click", async (e) => {
   for (const other of document.querySelectorAll("button[data-battle]")) other.disabled = true;
   try {
     const data = await api("/api/battle/start", { method: "POST", body: { id, defenderId: b.dataset.battle, mode } });
-    showResult(data);
+    await playThenShow(data);
   } catch (err) {
     if (!err.expired) toast(err.message, { tone: "error", timeout: 7000 });
   } finally {
@@ -230,6 +231,37 @@ document.addEventListener("click", async (e) => {
 });
 
 // ---------- Result ----------
+// The Fight record is written just after the fight, so the first read can miss it.
+async function fightRecord(fightId) {
+  for (let i = 0; i < 6; i++) {
+    try {
+      return (await api(`/api/fight-records/${encodeURIComponent(fightId)}?${q({})}`)).record;
+    } catch (err) {
+      if (err.expired || err.status !== 404) throw err;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+  return null;
+}
+
+/**
+ * Plays the fight on the page, then shows its result: when the replay ends,
+ * or straight away if the player closes it. No record: the result at once.
+ */
+async function playThenShow(data) {
+  if (!data?.result) return;
+  resultEl.hidden = true;
+  let record = null;
+  if (data.fightId) {
+    statusEl.textContent = "Loading the fight…";
+    record = await fightRecord(data.fightId).catch(() => null);
+    statusEl.textContent = "";
+  }
+  if (!record) return showResult(data);
+  await new Promise((resolve) => openReplay(record, id, { closeAtEnd: true, onClose: resolve }));
+  showResult(data);
+}
+
 function expList(rows) {
   if (!rows?.length) return "";
   return `<ul class="bt-exp">${rows.map((e) => `<li><span>${esc(e.name)}</span>
@@ -366,7 +398,7 @@ $("btPreview").addEventListener("click", async (e) => {
       renderRun();
       pollRun();
     } else {
-      showResult(data);
+      await playThenShow(data);
     }
   } catch (err) {
     if (!err.expired) toast(err.message, { tone: "error", timeout: 7000 });
