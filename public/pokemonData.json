@@ -7652,7 +7652,7 @@
   "486": {
     "id": 486,
     "name": "Regigigas",
-    "tier": "legendary",
+    "tier": "mythic",
     "region": "Sinnoh",
     "generation": 4,
     "types": [
@@ -11465,7 +11465,7 @@
   "718": {
     "id": 718,
     "name": "Zygarde",
-    "tier": "legendary",
+    "tier": "mythic",
     "region": "Kalos",
     "generation": 6,
     "types": [
@@ -14568,7 +14568,7 @@
   "891": {
     "id": 891,
     "name": "Kubfu",
-    "tier": "legendary",
+    "tier": "epic",
     "region": "Galar",
     "generation": 8,
     "types": [

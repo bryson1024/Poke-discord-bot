@@ -15,6 +15,7 @@ Sources: `pokemonData.json` (tiers), `battleData.json` (base stats), and `source
 - **D4.** Archaludon (600) → legendary. Slaking (670) stays epic; the follow-up is to model Truant and Slow Start in battles.
 - **D5.** New evolutions of older species → epic, following Gen 4 (21 of 22 there were epic): Wyrdeer, Kleavor, Ursaluna, Basculegion, Sneasler, Overqwil, Runerigus. Perrserker and Clodsire → rare.
 - **D6.** Power outliers move up one tier. Commons with BST ≥ 425 → uncommon. Uncommons ≥ 500 → rare. Rares ≥ 530 → epic.
+- **D10 (2026-11-16).** Regigigas (670) and Zygarde → mythic, reversing the D2 note that kept them legendary. Kubfu → epic; Urshifu stays legendary. Hall of Legends now needs 43 and Mythic Archive 26 (catalog revision 6).
 - **D9 (default, not discussed).** Dipplin → rare, to match Flapple and Appletun. The Gen 1–5 sibling branches are left as they are.
 
 ## Battle team

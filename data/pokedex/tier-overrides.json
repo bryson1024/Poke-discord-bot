@@ -71,6 +71,13 @@
    "decision": "D2",
    "reason": "Cover legendary with BST ≥ 660 → mythic, like Mewtwo, Lugia, Kyogre, Reshiram…"
   },
+  "486": {
+   "name": "Regigigas",
+   "from": "legendary",
+   "tier": "mythic",
+   "decision": "D10",
+   "reason": "Owner decision 2026-11-16: official legendary with BST 670, over the 660 mythic line (D2)"
+  },
   "487": {
    "name": "Giratina-altered",
    "from": "legendary",
@@ -106,6 +113,13 @@
    "decision": "D2",
    "reason": "Cover legendary with BST ≥ 660 → mythic, like Mewtwo, Lugia, Kyogre, Reshiram…"
   },
+  "718": {
+   "name": "Zygarde",
+   "from": "legendary",
+   "tier": "mythic",
+   "decision": "D10",
+   "reason": "Owner decision 2026-11-16: cover legendary of Pokémon Z, mythic like the other box legendaries"
+  },
   "863": {
    "name": "Perrserker",
    "from": "uncommon",
@@ -140,6 +154,13 @@
    "tier": "mythic",
    "decision": "D2",
    "reason": "Cover legendary with BST ≥ 660 → mythic, like Mewtwo, Lugia, Kyogre, Reshiram…"
+  },
+  "891": {
+   "name": "Kubfu",
+   "from": "legendary",
+   "tier": "epic",
+   "decision": "D10",
+   "reason": "Owner decision 2026-11-16: unevolved stage (BST 385); Urshifu stays legendary"
   },
   "899": {
    "name": "Wyrdeer",

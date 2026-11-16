@@ -21,16 +21,16 @@ const { EVOLVE_STONE_COST } = await import("../services/gameplay.js");
 
 section("Approved tier overrides are live in pokemonData.json");
 const ids = Object.keys(OVERRIDES).map(Number);
-assertEqual(ids.length, 39, "39 approved tier changes");
+assertEqual(ids.length, 42, "42 approved tier changes (39 + D10)");
 assertEqual(ids.filter((n) => DEX[n].tier !== OVERRIDES[n].tier), [], "every override is applied");
 assertEqual(ids.filter((n) => n <= 649 && BASELINE[n].tier !== OVERRIDES[n].from), [], "each Gen 1–5 override replaces its baseline tier");
 assertEqual(ids.filter((n) => OVERRIDES[n].from === OVERRIDES[n].tier), [], "no override is a no-op");
 const mythics = Object.values(DEX).filter((p) => p.tier === "mythic").map((p) => p.id);
 assertTrue([483, 484, 487, 646, 888, 889].every((n) => mythics.includes(n)), "Dialga, Palkia, Giratina, Kyurem, Zacian, Zamazenta are mythic");
-assertEqual(mythics.length, 44, "44 mythic species (38 + 6)");
+assertEqual(mythics.length, 46, "46 mythic species (38 + 6 + Regigigas, Zygarde)");
 assertEqual([1005, 1006, 1009, 1010, 1020, 1021, 1022, 1023, 1018].map((n) => DEX[n].tier), Array(9).fill("legendary"), "590-BST Paradox and Archaludon are legendary");
 assertEqual(DEX[289].tier, "epic", "Slaking stays epic (battle-side fix)");
-assertEqual(DEX[486].tier, "legendary", "Regigigas stays legendary");
+assertEqual([DEX[486].tier, DEX[718].tier, DEX[891].tier, DEX[892].tier], ["mythic", "mythic", "epic", "legendary"], "D10: Regigigas, Zygarde mythic; Kubfu epic; Urshifu legendary");
 const bad = [];
 for (const p of Object.values(DEX)) for (const t of p.evolvesTo) {
   if (TIER_ORDER.indexOf(DEX[t].tier) < TIER_ORDER.indexOf(p.tier)) bad.push(`${p.name}→${DEX[t].name} goes down`);
