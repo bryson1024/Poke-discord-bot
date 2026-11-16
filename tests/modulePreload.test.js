@@ -40,11 +40,12 @@ const run = (p, method = "GET") => {
   mw({ method, path: p }, res, () => { passed = true; });
   return { res, passed };
 };
-for (const p of ["/teams/", "/teams", "/teams/index.html"]) {
+for (const p of ["/teams/", "/teams/index.html"]) {
   const r = run(p);
   assertTrue(!r.passed && r.res.body.includes("modulepreload") && r.res.headers["Cache-Control"] === "no-cache", `${p} is served with hints`);
 }
-for (const p of ["/pokemonData.json", "/teams/script.js", "/sprites/", "/nope/", "/../bot_final.js"]) assertTrue(run(p).passed, `${p} falls through`);
+// No trailing slash: express.static redirects to "/<page>/" so relative links (href="style.css") resolve.
+for (const p of ["/teams", "/admindashboard", "/teams/script.js", "/sprites/", "/nope/", "/../bot_final.js"]) assertTrue(run(p).passed, `${p} falls through`);
 assertTrue(run("/teams/", "POST").passed, "POST falls through");
 
 finish();
