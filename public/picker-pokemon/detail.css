@@ -39,6 +39,8 @@ dialog.cc-detail::backdrop { background: #05070f99; }
 .dt-moves { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .dt-move { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px; border-radius: 10px; background: var(--cc-surface-raised); font-size: 13px; font-weight: 700; }
 .dt-move .cc-type { font-size: 9px; padding: 2px 6px; }
+.dt-move > span { min-width: 0; flex: 1; }
+.dt-move { align-items: flex-start; }
 /* The Ability it fights with on this team (full sim): name, then its one-line text. */
 .dt-ability { display: grid; gap: 2px; margin-top: 8px; padding: 8px 10px; border-radius: 10px; border: 1px dashed var(--cc-line); font-size: 13px; }
 .dt-ability small { font-size: 12px; font-weight: 600; }

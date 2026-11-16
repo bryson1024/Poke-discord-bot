@@ -55,3 +55,24 @@ export function moveMeta(m, { extra = [] } = {}) {
   for (const x of extra) if (x) bits.push(esc(x));
   return `<span class="cc-movemeta">${typeChip(m?.type)}${categoryBadge(m?.category)}${bits.length ? `<span class="cc-movemeta-nums">${bits.join(" · ")}</span>` : ""}</span>`;
 }
+
+// ---------- What a move does ----------
+// A line under the move (server fields desc / acc / priority, from
+// utils/battle/moveText.js). Lines that say nothing are left out: a plain
+// attack's "No additional effect.", "Accuracy 100%", and "never misses" on
+// a status move (they don't roll to hit in any way that matters to a player).
+
+const NOTHING = new Set(["No additional effect."]);
+
+/** The "what it does" line under a move, or "" when there's nothing to add. */
+export function moveDescLine(m) {
+  const text = m?.desc && !NOTHING.has(m.desc) ? m.desc : "";
+  const facts = [];
+  const status = String(m?.category ?? "").toLowerCase() === "status";
+  if (m?.acc === true && !status) facts.push("Never misses");
+  else if (Number.isFinite(m?.acc) && m.acc < 100) facts.push(`${esc(m.acc)}% accuracy`);
+  if (m?.priority > 0) facts.push(`Moves first (priority +${esc(m.priority)})`);
+  else if (m?.priority < 0) facts.push(`Moves last (priority ${esc(m.priority)})`);
+  if (!text && !facts.length) return "";
+  return `<span class="cc-movedesc">${esc(text)}${facts.length ? `<small>${facts.join(" · ")}</small>` : ""}</span>`;
+}

@@ -29,7 +29,8 @@ import { tmMovesForSpecies } from "../utils/battle/tmData.js";
 
 const sum = (s) => (s ? s.hp + s.atk + s.def + s.spa + s.spd + s.spe : null);
 const nameOf = (id) => displaySpeciesName(id, getSpeciesEntry(id)?.name);
-const moveInfo = (m) => { const x = getMove(m); return x ? { id: m, name: x.name, type: x.type ?? null, power: x.power ?? null, category: x.category ?? null } : { id: m, name: String(m), type: null, power: null, category: null }; };
+// The same move info as services/movesets.js (desc, acc and priority included).
+const moveInfo = movesetMoveInfo;
 
 /** Where this copy sits on each team: { display: 2, battle: null } (1-based slots). */
 function teamSlots(user, id, variant) {

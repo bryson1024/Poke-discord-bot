@@ -18,7 +18,7 @@
 
 import { toast, showActionError, showExpired } from "/public/shared/shell.js";
 import { openTeachDialog } from "/public/shared/teachTm.js";
-import { moveMeta } from "/public/shared/moveMeta.js";
+import { moveMeta, moveDescLine } from "/public/shared/moveMeta.js";
 import { MAX, AUTOMATIC, startPicks, shownMoves, tickedMoves, lostMoves, toggleMove, pickFrom, savedMoves, canSave, moveRow } from "/public/teams/movePicks.js";
 
 const LABEL = { display: "Casual team", battle: "Ranked team" };
@@ -156,6 +156,7 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
         ${copy.learnable.map((m) => moveRow(m, {
           on: ticked.includes(m.id), full, recommended: rec.includes(m.id),
           meta: moveMeta(m, { extra: [m.source === "tm" ? "TM" : m.learnedAt ? `Lv ${m.learnedAt}` : "", isStab(m) ? "STAB ×1.5" : ""] }),
+          details: moveDescLine(m),
         })).join("")}
       </ul>
       ${abilityBlock(abilityView, team, abilityPick)}
