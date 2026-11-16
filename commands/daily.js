@@ -19,6 +19,7 @@ import { getAcquirablePokemon } from "../utils/dataLoader.js";
 import { selectRandomPokemonForUser } from "../utils/weightedRandom.js";
 import { rollForShiny } from "../shinyOdds.js";
 import { grantCatch } from "../utils/training.js";
+import { RARE_CANDY_DAILY } from "../utils/battle/tuning.js";
 import { broadcastReward } from "../utils/broadcastReward.js";
 import { ensureUserInitialized } from "../utils/userInitializer.js";
 import { spritePaths, rarityEmojis, rarityColors } from "../spriteconfig.js";
@@ -55,7 +56,7 @@ function getUTCDateString() {
 // ==========================================================
 export const data = new SlashCommandBuilder()
   .setName("daily")
-  .setDescription("Claim your daily reward (2 Pokémon + CC + TP + stone chance)");
+  .setDescription("Claim your daily reward (2 Pokémon + CC + TP + 2 Rare Candy + stone chance)");
 
 // ==========================================================
 // EXECUTION
@@ -137,7 +138,7 @@ export async function execute(
       // ======================================================
       // Apply Pokémon to inventory
       // ======================================================
-      // Each catch's result (catch Level, first catch or duplicate EXP) is shown on the card.
+      // Each catch's result (catch Level, NEW, or a duplicate's Rare Candy) is shown on the card.
       const rankBefore = getRank(user.tp);
       const caught1 = grantCatch(user, pick1.id, shiny1 ? "shiny" : "normal");
       const caught2 = grantCatch(user, pick2.id, shiny2 ? "shiny" : "normal");
@@ -157,6 +158,9 @@ export async function execute(
         // Same 1-stone reward as before, through the inventory service.
         stoneAwarded = grantItem(user, "evolution_stone", 1).ok;
       }
+      // Rare Candy: 2 every day, plus one for each duplicate catch above.
+      const candyDaily = grantItem(user, "rare_candy", RARE_CANDY_DAILY).ok ? RARE_CANDY_DAILY : 0;
+      const candyAwarded = candyDaily + (caught1.rareCandy || 0) + (caught2.rareCandy || 0);
       // Mega Shards: a separate roll, only while the Mega rewards switch is on
       // (returns 0 and touches nothing otherwise).
       const shardsAwarded = rollDailyShards(user);
@@ -203,6 +207,7 @@ export async function execute(
         ccAwarded: dailyCC,
         tpAwarded: DAILY_TP,
         stoneAwarded,
+        ...(candyAwarded ? { rareCandyAwarded: candyAwarded } : {}),
         ...(shardsAwarded ? { megaShardsAwarded: shardsAwarded } : {}),
         pokemon: [
           {
@@ -257,6 +262,9 @@ export async function execute(
         });
         summary.setThumbnail(`${spritePaths.items}evolution_stone.png`);
       }
+      if (candyAwarded) {
+        summary.addFields({ name: "🍬 Rare Candy", value: `You received **${candyAwarded}× Rare Candy**! Use it on any Pokémon from Collection on the dashboard.` });
+      }
       if (shardLine) summary.addFields({ name: "💠 Mega Shards", value: shardLine });
       if (saveAck.note) summary.setDescription(saveAck.note);
 
@@ -271,6 +279,7 @@ export async function execute(
           cc: dailyCC,
           tp: DAILY_TP,
           stone: stoneAwarded,
+          candy: candyAwarded,
           balance: { cc: user.cc, tp: user.tp },
           rankUp: rankAfter && rankAfter !== rankBefore ? rankAfter : null,
           dex: dexProgress(user, [pick1.id, pick2.id]), // today's regions + national, after both catches

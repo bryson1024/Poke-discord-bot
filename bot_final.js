@@ -475,6 +475,7 @@ import { lockUser } from "./utils/userLocks.js";
 import { createMessageHandler, createRoleFlush } from "./utils/passiveChat.js";
 import { createEncounterService, isEncounterButton } from "./utils/encounter/service.js";
 import { grantCatch, levelsForUser } from "./utils/training.js";
+import { RARE_CANDY_CHAT_CHANCE } from "./utils/battle/tuning.js";
 import { refundAllPending } from "./utils/battle/wager.js";
 import { closeAllRematches } from "./utils/battle/rematch.js";
 import { finishAllOpenRuns, challengeLogEntry, hideOpenRun, challengeProgress } from "./utils/challenge/runChallenge.js";
@@ -1399,6 +1400,7 @@ client.on(
       tpGain: MESSAGE_TP_GAIN,
       ccChance: MESSAGE_CC_CHANCE,
       ccGain: MESSAGE_CC_GAIN,
+      candyChance: RARE_CANDY_CHAT_CHANCE,
     },
     log: logEvent,
     enqueueSave,
@@ -2914,12 +2916,12 @@ app.post("/api/pokemon/donate-bulk", express.json({ limit: "100kb" }), async (re
 // Costs dust by tier of the Pokémon being converted.
 // Blocks converting if the NORMAL variant is currently displayed.
 // ==========================================================
-app.post("/api/pokemon/feed", express.json(), async (req, res) => {
+app.post("/api/pokemon/rare-candy", express.json(), async (req, res) => {
   try {
-    const r = await gameplay.feed({ body: req.body || {}, isAuthorized: (id) => requireDashboardSession(req, id) });
+    const r = await gameplay.useRareCandy({ body: req.body || {}, isAuthorized: (id) => requireDashboardSession(req, id) });
     return res.status(r.status).json(r.body);
   } catch (err) {
-    console.error("❌ /api/pokemon/feed:", err?.message || err);
+    console.error("❌ /api/pokemon/rare-candy:", err?.message || err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

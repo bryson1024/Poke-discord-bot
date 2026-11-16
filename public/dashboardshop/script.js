@@ -442,6 +442,8 @@ async function claimWeeklyPack() {
   const rewardLines = rewards.map(
     (r) => `<span class="reward-line">${tierPill(r.rarity)} ${escapeHtml(displayNameFromStored(r.name))}</span>`
   );
+  const candy = Number(res.rareCandy) || 0;
+  if (candy) rewardLines.push(`<span class="reward-line">🍬 ${candy} × Rare Candy</span>`);
 
   showShopModal({
     title: "Weekly Pack Rewards!",
@@ -449,6 +451,7 @@ async function claimWeeklyPack() {
     sprites: [
       "/public/sprites/items/starter_pack.png",
       ...rewards.map((r) => r.sprite),
+      ...(candy ? ["/public/sprites/items/rare_candy.png"] : []),
     ],
     onConfirm: () => {},
   });

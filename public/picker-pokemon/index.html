@@ -16,7 +16,7 @@
     <header class="cc-page-head">
       <p class="cc-eyebrow">Your Pokémon</p>
       <h1>Collection</h1>
-      <p>Every Pokémon you own right now, one per box slot. Each one has its own Level. Tap one for details, or evolve, feed, donate and convert. Everything you have ever caught is in your Pokédex.</p>
+      <p>Every Pokémon you own right now, one per box slot. Each one has its own Level. Tap one for details, or evolve, give Rare Candy, donate and convert. Everything you have ever caught is in your Pokédex.</p>
     </header>
 
     <main id="ccMain" tabindex="-1">
@@ -33,6 +33,10 @@
         <div class="stat-item">
           <img src="/public/sprites/items/tp_icon.png" class="stat-icon" alt="" />
           <span id="tpCount">0</span> <span class="stat-label">TP</span>
+        </div>
+        <div class="stat-item">
+          <img src="/public/sprites/items/rare_candy.png" class="stat-icon" alt="" />
+          <span id="candyCount">0</span> <span class="stat-label">Rare Candy</span>
         </div>
         <div class="stat-item stat-gold">
           <img src="/public/sprites/items/shiny_dust.png" class="stat-icon" alt="" />
@@ -51,7 +55,7 @@
         <div id="modeToggle" role="group" aria-label="Mode">
           <button class="mode-btn active" data-mode="browse" type="button">Browse</button>
           <button class="mode-btn" data-mode="evolve" type="button">Evolve</button>
-          <button class="mode-btn" data-mode="feed" type="button">Feed</button>
+          <button class="mode-btn" data-mode="candy" type="button">Rare Candy</button>
           <button class="mode-btn" data-mode="donate" type="button">Donate</button>
           <button class="mode-btn" data-mode="convert" type="button">Convert</button>
         </div>
