@@ -111,6 +111,17 @@ flyctl secrets unset RESTORE_FROM CONFIRM_RESTORE -a poke-discord-bot-49shta
 
 The player-data format is unchanged across these releases, so older code can load the newer Discord backups. It ignores the metadata in the message text and simply takes the newest attachment. There's one exception. Since the Squirtle Squad release, a box copy can carry `variant` (the Squirtle Squad Leader). The release before it loads the Leader as a plain Squirtle and drops a TM-trained Leader's TM moves. [`docs/adr/0002-special-variants.md`](docs/adr/0002-special-variants.md) lists what comes back after rolling forward again.
 
+## Full sim switch
+`FULL_SIM_ENABLED=1` moves every fight to Pokémon Showdown's engine with Battle plans (README, "Full sim and Battle plans"). Unset, the bot runs exactly as before.
+
+- **Turn on.** Set `FULL_SIM_ENABLED=1` and restart. On that first start the bot records the current moves of every unpicked Team member (log line `⚔️ Full sim: recorded current moves for N player(s)`) and saves. Later starts skip it.
+- **Workers.** `SIM_THREADS` (default 1, 0 = main thread) sets the sim worker threads. Each worker holds its own copy of the engine, about 160 MB, and `0` loads it into the bot's own process instead. The VPS also runs other services, so keep it at 1 unless fights queue. With the switch off the engine never loads.
+- **Failed fights.** A fight the sim can't finish changes nothing and logs one line. `⚠️ wager fight failed` means both Stakes went back, `⚠️ encounter fight failed` means the card stays open, and `⚠️ challenge fight failed` means the player was told to try again or that their run is paused. At startup, `⚠️ couldn't finish the open Elite Four run of <user id>` leaves that run open for the next start.
+- **Restarts.** A stop (`SIGTERM`) waits up to 5 seconds for fights already on the sim, so their results are saved; `⚠️ A sim fight was still running at shutdown` means one didn't finish in time and doesn't count. A restart during a Wager fight refunds both Stakes (the offer message says so), and an Elite Four run saved mid-fight replays that fight at startup.
+- **Worker failures.** A worker that dies is replaced only while fights are waiting. One that can't even load the engine is retried with a growing delay, and after 5 failures in a row the waiting fights fail (`⚠️ sim worker failed to start 5 times in a row`).
+- **Battle FX only.** Full-sim replays animate status conditions and stat changes. To turn only that off, set `BATTLE_FX=0` and restart. Replays go back to plain hits and the usual 2-second pace, and fights don't change.
+- **Roll back.** Unset `FULL_SIM_ENABLED` and restart. Fights go back to the old engines, saved plans and recorded moves stay for next time, and new Fight records still replay. An Elite Four run that started on the full sim finishes on it.
+
 ## Production host (VPS)
 
 Production is moving from Fly to a VPS (Ubuntu 26.04). SSH in through the `pokebot-vps` alias: add `Host pokebot-vps` with the real `HostName` and `User` to your own `~/.ssh/config`. Keep the address and login out of the repo. Until the cutover below is done, Fly is still production and the sections above still apply.

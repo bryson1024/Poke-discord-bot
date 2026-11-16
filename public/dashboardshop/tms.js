@@ -12,11 +12,15 @@
 // ======================================================================
 
 import { showMessage, isExpired, showExpired } from "/public/shared/shell.js";
-import { moveMeta, tmDisc } from "/public/shared/moveMeta.js";
+import { moveMeta, moveDescLine, tmDisc, categoryBadge } from "/public/shared/moveMeta.js";
+import { filterTms } from "/public/dashboardshop/tmFilter.js";
 
 const TYPES = ["Normal", "Fire", "Water", "Electric", "Grass", "Ice", "Fighting", "Poison", "Ground", "Flying", "Psychic", "Bug", "Rock", "Ghost", "Dragon", "Dark", "Steel", "Fairy"];
 const TIER_LABEL = { basic: "Basic", standard: "Standard", power: "Power", premium: "Premium", elite: "Elite" };
-const state = { userId: null, data: null, filter: { q: "", type: "", tier: "", mine: true } };
+const CATEGORIES = ["Physical", "Special", "Status"];
+const SORTS = { learners: "Most learners", power: "Power", "price-asc": "Price: low → high", "price-desc": "Price: high → low", name: "Name" };
+const DEFAULT_FILTER = { q: "", type: "", tier: "", mine: true, cat: "", sort: "learners" };
+const state = { userId: null, data: null, filter: { ...DEFAULT_FILTER } };
 
 const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const fmt = (n) => Number(n ?? 0).toLocaleString("en-US");
@@ -43,6 +47,8 @@ function mount() {
   if (!main || document.getElementById("tmHeading")) return;
   const section = document.createElement("section");
   section.className = "shop-section tmx";
+  section.id = "tms";
+  section.dataset.navLabel = "TMs";
   section.setAttribute("aria-labelledby", "tmHeading");
   section.innerHTML = `
     <h2 id="tmHeading">Technical Machines</h2>
@@ -54,9 +60,17 @@ function mount() {
         <select id="tmxType"><option value="">All types</option>${TYPES.map((t) => `<option>${t}</option>`).join("")}</select></label>
       <label class="tmx-field"><span class="sr-only">Price tier</span>
         <select id="tmxTier"><option value="">All prices</option>${Object.entries(TIER_LABEL).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>
+      <label class="tmx-field"><span class="sr-only">Sort</span>
+        <select id="tmxSort">${Object.entries(SORTS).map(([k, v]) => `<option value="${k}">Sort: ${v}</option>`).join("")}</select></label>
+    </div>
+    <div class="tmx-filters">
+      <div class="tmx-chips" role="group" aria-label="Move category">
+        <button type="button" class="tmx-chip" data-cat="" aria-pressed="true">All</button>
+        ${CATEGORIES.map((c) => `<button type="button" class="tmx-chip" data-cat="${c}" aria-pressed="false">${categoryBadge(c)}</button>`).join("")}
+      </div>
       <label class="tmx-check"><input type="checkbox" id="tmxMine" checked /> Only TMs my Pokémon can learn</label>
     </div>
-    <p class="tmx-count" id="tmxCount" aria-live="polite"></p>
+    <p class="tmx-count"><span id="tmxCount" aria-live="polite"></span> <button type="button" class="tmx-clear" id="tmxClear" hidden>Clear filters</button></p>
     <div class="shop-grid tmx-grid" id="tmxGrid"></div>`;
   const weekly = main.querySelector('[aria-labelledby="weeklyHeading"]');
   main.insertBefore(section, weekly ?? null);
@@ -65,6 +79,21 @@ function mount() {
   section.querySelector("#tmxType").addEventListener("change", (e) => { state.filter.type = e.target.value; render(); });
   section.querySelector("#tmxTier").addEventListener("change", (e) => { state.filter.tier = e.target.value; render(); });
   section.querySelector("#tmxMine").addEventListener("change", (e) => { state.filter.mine = e.target.checked; render(); });
+  section.querySelector("#tmxSort").addEventListener("change", (e) => { state.filter.sort = e.target.value; render(); });
+  section.querySelector(".tmx-chips").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-cat]");
+    if (!chip) return;
+    state.filter.cat = chip.dataset.cat;
+    render();
+  });
+  section.querySelector("#tmxClear").addEventListener("click", () => {
+    state.filter = { ...DEFAULT_FILTER, sort: state.filter.sort };
+    section.querySelector("#tmxQ").value = "";
+    section.querySelector("#tmxType").value = "";
+    section.querySelector("#tmxTier").value = "";
+    section.querySelector("#tmxMine").checked = true;
+    render();
+  });
   section.querySelector("#tmxGrid").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-tm]");
     if (btn) confirmBuy(btn.dataset.tm);
@@ -72,11 +101,13 @@ function mount() {
   render();
 }
 
-function visible() {
-  const { q, type, tier, mine } = state.filter;
-  return state.data.tms
-    .filter((t) => (!q || t.name.toLowerCase().includes(q)) && (!type || t.type === type) && (!tier || t.tier === tier) && (!mine || t.teaches > 0))
-    .sort((a, b) => b.teaches - a.teaches || a.price - b.price || a.name.localeCompare(b.name));
+const visible = () => filterTms(state.data.tms, state.filter);
+
+/** "12 of 96 TMs · Physical · Fire" — what is filtered, so it is clear how to undo it. */
+function countLine(n) {
+  const f = state.filter;
+  const parts = [f.cat, f.type, f.tier && TIER_LABEL[f.tier], f.q && `"${f.q}"`, f.mine && "My Pokémon can learn"].filter(Boolean);
+  return [`${fmt(n)} of ${fmt(state.data.tms.length)} TMs`, ...parts].join(" · ");
 }
 
 function card(t) {
@@ -84,7 +115,7 @@ function card(t) {
   return `<div class="shop-item tmx-item" data-tier="${esc(t.tier)}">
     <div class="tmx-top">${tmDisc(t.type, { size: 60 })}<span class="tmx-tier">${esc(TIER_LABEL[t.tier] ?? t.tier)}</span></div>
     <h3>${esc(t.name)}</h3>
-    <p class="desc">${moveMeta(t)}</p>
+    <p class="desc">${moveMeta(t)}${moveDescLine({ ...t, acc: null })}</p>
     <p class="tmx-meta">${t.teaches > 0 ? `${fmt(t.teaches)} of your Pokémon can learn it` : "None of your Pokémon can learn it"}${t.owned ? ` · <b>You have ${fmt(t.owned)}</b>` : ""}</p>
     <p class="price">${fmt(t.price)} CC</p>
     <button type="button" class="buy-btn" data-tm="${esc(t.item)}"${affordable ? "" : " disabled"} aria-label="Buy ${esc(t.name)} for ${fmt(t.price)} CC">${affordable ? "Buy" : "Not enough CC"}</button>
@@ -95,7 +126,10 @@ function render() {
   const grid = document.getElementById("tmxGrid");
   if (!grid) return;
   const list = visible();
-  document.getElementById("tmxCount").textContent = `${list.length} of ${state.data.tms.length} TMs`;
+  document.getElementById("tmxCount").textContent = countLine(list.length);
+  const f = state.filter;
+  document.getElementById("tmxClear").hidden = !(f.q || f.type || f.tier || f.cat || !f.mine);
+  for (const chip of document.querySelectorAll(".tmx-chip")) chip.setAttribute("aria-pressed", String(chip.dataset.cat === f.cat));
   grid.innerHTML = list.length ? list.map(card).join("") : `<p class="tmx-empty">No TMs match these filters.</p>`;
 }
 

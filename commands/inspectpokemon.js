@@ -15,8 +15,12 @@ import { safeReply } from "../utils/safeReply.js";
 import { getTraining } from "../utils/training.js";
 import { getSpecies, getMove } from "../utils/battle/data.js";
 import { computeStats } from "../utils/battle/stats.js";
-import { autoMoveset } from "../utils/battle/moveset.js";
 import { chosenMoves } from "../services/movesets.js";
+import { defaultMoves } from "../services/fullSimCutover.js";
+import { getPlan } from "../services/battlePlans.js";
+import { chosenAbility } from "../services/abilities.js";
+import { pickAbility } from "../utils/battle/ai/abilities.js";
+import { isFullSimEnabled } from "../config/fullSim.js";
 import { formatTypesLine } from "./pokedex.js";
 import { threaded } from "../utils/render/renderers.js";
 import { ownsVariant } from "../services/box.js";
@@ -26,6 +30,9 @@ import { VARIANT_KEYS, specialBattleProfile } from "../utils/specialVariants.js"
 const ownedVariants = (user, id) => VARIANT_KEYS.filter((v) => ownsVariant(user, id, v));
 
 const statLine = (s) => `HP ${s.hp} · Atk ${s.atk} · Def ${s.def} · SpA ${s.spa} · SpD ${s.spd} · Spe ${s.spe}`;
+// Full sim: the ability it fights with on the Display team: the player's choice, else the plan's pick (per fight).
+// A chosen Ability on the Casual team (services/abilities.js) wins over the plan's pick.
+const planAbility = (user, speciesId, variant) => (isFullSimEnabled() ? chosenAbility(user, "display", speciesId, variant) ?? pickAbility(speciesId, getPlan(user, "display")) ?? null : null);
 
 // Level, stats at that Level, and moves for each variant the player owns
 // (the Casual team's chosen moveset, else the automatic one; the Ranked
@@ -39,11 +46,12 @@ export function battleInfo(user, speciesId) {
     const names = (ids) => ids.map((m) => getMove(m)?.name ?? m).join(", ");
     const display = chosenMoves(user, "display", speciesId, variant);
     const battle = chosenMoves(user, "battle", speciesId, variant);
-    const moves = names(display ?? autoMoveset(speciesId, level));
+    const moves = names(display ?? defaultMoves(user, { id: speciesId, variant }, level));
     const special = specialBattleProfile(variant); // its own name and base stats
     const label = special ? `${special.name} Lv ${level}` : variant === "shiny" ? `✨ shiny Lv ${level}` : `Lv ${level}`;
     const battleLine = battle ? `\nRanked team moves: ${names(battle)}` : "";
-    return `**Your ${label}** · ${statLine(computeStats((special ?? species).baseStats, level))}\nMoves: ${moves}${battleLine}`;
+    const ability = planAbility(user, speciesId, variant);
+    return `**Your ${label}** · ${statLine(computeStats((special ?? species).baseStats, level))}\nMoves: ${moves}${battleLine}${ability ? `\nAbility: ${ability}` : ""}`;
   }).join("\n\n");
 }
 
@@ -106,9 +114,10 @@ export function inspectSlots(user, pokemon) {
     // The card shows the Casual team's chosen moves, else the automatic ones.
     return owned.map((variant) => {
       const member = { speciesId: id, variant, level: getTraining(user, id, variant).level };
-      const moves = chosenMoves(user, "display", id, variant);
-      if (moves) member.moves = moves;
-      return { ...slotView(user, member, 0), slot: null };
+      // Full sim: with none picked, the moves recorded at cutover (the same as automatic with it off).
+      member.moves = chosenMoves(user, "display", id, variant) ?? defaultMoves(user, { id, variant }, member.level);
+      const ability = planAbility(user, id, variant);
+      return { ...slotView(user, member, 0), slot: null, ...(ability && { ability }) };
     });
   }
   const base = slotView({}, { speciesId: id, variant: "normal", level: 1 }, 0);

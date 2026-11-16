@@ -27,10 +27,13 @@ import { playerId, showBanner, showExpired, toast, showActionError, confirmDialo
 import { displaySpeciesName } from "/public/shared/names.js";
 import { scanFx } from "/public/shared/spriteFx.js";
 import { openMovesEditor } from "/public/teams/moves.js";
+import { loadPlans, planRowHtml, savePlan, recommendedFor, abilityChanges } from "/public/teams/plans.js";
 import { chooseCopy } from "/public/teams/copyPicker.js";
 import { openItemPicker, itemIcon, claimStarter } from "/public/teams/items.js";
 import { openDetail } from "/public/picker-pokemon/detail.js";
 import { SPECIAL_NAMES, isSpecial, variantKey, specialSprite, rowVariant } from "/public/spriteconfig.js";
+import { powerInfoButton } from "/public/shared/powerInfo.js";
+import { viewState, setUrlParam, debounce } from "/public/shared/viewState.js";
 
 const TEAMS = ["showcase", "display", "battle"];
 const LABEL = { showcase: "Showcase team", display: "Casual team", battle: "Ranked team" };
@@ -46,11 +49,16 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const keyOf = (s) => `${s.id}:${s.variant}`;
 // A stored slot as the page keeps it. `uid` names a trained copy (TM system);
 // it must survive every edit, or saving would drop the copy from its slot.
-const slotFromServer = (s) => ({ id: Number(s.id), variant: variantKey(s.variant), ...(s.mega ? { mega: s.mega } : {}), ...(s.uid ? { uid: s.uid } : {}) });
+const slotFromServer = (s) => ({ id: Number(s.id), variant: variantKey(s.variant), ...(s.mega ? { mega: s.mega } : {}), ...(/^(kyurem-(black|white)|necrozma-(duskmane|dawnwings))$/.test(s.form ?? "") ? { form: s.form } : {}), ...(s.uid ? { uid: s.uid } : {}) });
 const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 const app = document.getElementById("teamsApp");
+// Phones show the box in a bottom sheet, wider screens in the side panel:
+// draw it in one place only (it is ~370 tiles for a big collection).
+const NARROW = window.matchMedia("(max-width: 820px)");
+// Filters, sort and team survive a trip to another page (this browser tab only).
+const view = viewState("teams", { q: "", show: "all", sort: "power", active: "" });
 const sheet = document.getElementById("boxSheet");
 const sheetBody = document.getElementById("boxSheetBody");
 const userId = playerId();
@@ -59,10 +67,12 @@ const state = {
   data: {},              // pokemonData by id
   pokemon: {},           // owned counts
   levels: {},            // "6:normal" → Level
-  powers: {},            // "6:normal" → Power
+  powers: {},            // "6:normal" → Power at the line's real Level
+  powers50: {},          // "6" → Power at Lv 50 (Ranked and wager battles)
   trained: {},           // "6:normal" → [trained copies] (TM system)
   megaOn: false,
   megaCards: [], // GET /api/mega cards (only while Mega Evolution is on)
+  fusion: { enabled: false, forms: [] }, // fusion forms (GET /api/user-pokemon `fusion`)
   saved: { showcase: [], display: [], battle: null },
   copies: [],            // [[uid, id, shiny, level, caughtAt, trained, teams]] (docs/adr/0001)
   notices: [],           // one-time Battle team notices (GET /api/user-pokemon)
@@ -70,19 +80,26 @@ const state = {
   active: "display",
   error: { showcase: null, display: null, battle: null },
   filter: { q: "", show: "all", sort: "power" },
+  // Team check (POST /api/team-check) for the team on screen: { key, data, open }.
+  check: { key: null, data: null, open: false, failed: false },
   saving: false,
   // Held items (GET /api/held-items). enabled false = no item UI at all.
   held: { enabled: false, items: [], groups: [], rev: 0, teams: { showcase: null, display: null, battle: null } },
   // A whole-team copy waiting for Save: { source: "display"|"battle", keys: ["6:normal", …] }.
-  // Save sends it as copyFrom so the server copies those Pokémon's moves too.
+  // Save sends it as copyFrom so the server copies those Pokémon's moves, Abilities and held items too.
   copied: { showcase: null, display: null, battle: null },
+  // Battle plans (GET /api/battle-plans, full sim only). enabled false = no plan row.
+  plans: { enabled: false, plans: [], teams: {} },
 };
 
 // ---------- helpers ----------
 const species = (id) => state.data[id] ?? { name: `#${id}`, tier: "common", types: [] };
 const isMythic = (id) => String(species(id).tier).toLowerCase() === "mythic";
 /** Type chips (text on the type color, never color alone). Base form's types. */
-const typeChips = (id) => `<span class="tm-types">${(species(id).types ?? []).map((t) => TYPE_NAMES[t]).filter(Boolean).map((t) => `<span class="cc-type" data-type="${t}">${t}</span>`).join("")}</span>`;
+const chipsOf = (names) => `<span class="tm-types">${names.filter(Boolean).map((t) => `<span class="cc-type" data-type="${t}">${t}</span>`).join("")}</span>`;
+const typeChips = (id) => chipsOf((species(id).types ?? []).map((t) => TYPE_NAMES[t]));
+/** A team slot's types: a fusion form's own (Dusk Mane is Psychic/Steel), else the species'. */
+const slotTypeChips = (s) => (fusionOf(s)?.types ? chipsOf(fusionOf(s).types.map((t) => String(t).toLowerCase())) : typeChips(s.id));
 /** The copies of one Pokémon + Variant, best Level first: [{ uid, level, trained }]. */
 const copiesOfLine = (id, variant) => state.copies
   .filter((r) => r[1] === Number(id) && rowVariant(r) === variantKey(variant))
@@ -98,15 +115,40 @@ const isTrainedCopy = (s) => !!(s.uid && state.copies.find((r) => r[0] === s.uid
 /** The slot's own Level (its copy), else the line's best. */
 const levelOf = (s) => (s.uid && state.copies.find((r) => r[0] === s.uid)?.[3]) ?? state.levels[keyOf(s)] ?? "?";
 const powerOf = (s) => state.powers[keyOf(s)] ?? 0;
+/** Power at Lv 50, the Level Ranked battles use: the Mega form's when the slot uses one. */
+const power50Of = (s) => (fusionOf(s)?.power50 ?? null) ?? (s.mega && state.megaOn ? megaCard(s.mega)?.power50 : null) ?? state.powers50[s.id] ?? 0;
+// ---------- Fusion forms (utils/fusions.js): Black/White Kyurem, Dusk Mane/Dawn Wings Necrozma ----------
+/** The slot's fusion form while it is enabled, else null. */
+const fusionOf = (s) => (s?.form && state.fusion.enabled ? state.fusion.forms.find((f) => f.id === s.form) ?? null : null);
+/** Fusion forms this copy can use (its species' forms with the partner owned). */
+const fusionFormsFor = (s) => (state.fusion.enabled ? state.fusion.forms.filter((f) => f.species === Number(s.id) && f.unlocked?.[s.variant]) : []);
+/** "Kyurem, Zekrom or Reshiram": the members a fused form's team can't have. */
+const familyNames = (f) => { const n = f.family.map((id) => species(id).name); return `${n.slice(0, -1).join(", ")} or ${n.at(-1)}`; };
+/** Family rule (Casual and Ranked): the reason `s` can't join `list` beside a fused family member, or null. */
+function fusionClash(list, s) {
+  if (!state.fusion.enabled) return null;
+  const own = fusionOf(s);
+  if (own) {
+    const other = list.find((m) => own.family.includes(Number(m.id)));
+    return other ? `${own.name} can't be on a team with ${slotName(other)}.` : null;
+  }
+  const fused = list.map(fusionOf).find((f) => f && f.family.includes(Number(s.id)));
+  return fused ? `${species(s.id).name} can't join a team with ${fused.name}.` : null;
+}
+/** Ranked's one-mythic limit: a fused slot counts as mythic-tier. */
+const isMythicSlot = (s) => isMythic(s.id) || !!fusionOf(s);
+const fmt = (n) => Number(n).toLocaleString("en-US");
 const megaCard = (formId) => state.megaCards.find((c) => c.formId === formId);
 /** The Pokémon's name, or a Special variant's own (the Squirtle Squad Leader). */
 const nameOf = (s) => (isSpecial(s.variant) ? SPECIAL_NAMES[s.variant] : species(s.id).name);
-const slotName = (s) => (s.mega && state.megaOn ? megaCard(s.mega)?.name ?? megaName(s) : nameOf(s));
+const slotName = (s) => fusionOf(s)?.name ?? (s.mega && state.megaOn ? megaCard(s.mega)?.name ?? megaName(s) : nameOf(s));
 /** Mega forms this exact copy can use on a team (unlocked on its line, allowed for teams). */
 const megaFormsFor = (s) => state.megaCards.filter((c) => c.line === `${s.id}:${s.variant}` && c.teamSelectable);
 const megaName = (s) => `Mega ${species(s.id).name}${/-([xy])$/.test(s.mega) ? ` ${s.mega.slice(-1).toUpperCase()}` : ""}`;
 function spriteOf(s) {
   if (isSpecial(s.variant)) return specialSprite(s.variant);
+  const fusion = fusionOf(s);
+  if (fusion) return `/public/sprites/pokemon/${s.variant === "shiny" ? "shiny" : "normal"}/${fusion.spriteId}.gif`;
   if (s.mega && state.megaOn) return `/public/sprites/pokemon/mega/${s.variant}/${s.mega}.gif`;
   return `/public/sprites/pokemon/${s.variant === "shiny" ? "shiny" : "normal"}/${s.id}.gif`;
 }
@@ -136,7 +178,17 @@ function itemControls(t, s, i, name) {
   if (!state.held.enabled) return { badge: "", button: "" };
   const megaDraft = !!(s.mega && state.megaOn);
   const entry = loadoutOf(t, s);
-  if (megaDraft || entry?.megaSlot) {
+  // A fusion form: its fusion item (DNA Splicers, N-Solarizer, N-Lunarizer) fills the item slot, like a Mega Stone.
+  if (fusionOf(s) || (entry?.megaSlot?.fusion && s.form)) {
+    const f = fusionOf(s);
+    const ph = f ? { glyph: f.glyph, fusion: true } : entry.megaSlot;
+    const itemName = f?.item ?? entry?.megaSlot?.stoneName ?? "Fusion item";
+    return {
+      badge: `<span class="hi-badge" title="${esc(itemName)}: the fusion uses this item slot">${itemIcon(null, { size: "sm", mega: ph })}</span>`,
+      button: `<span class="hi-slotbtn is-mega" title="${esc(f?.name ?? "This fusion")} holds ${esc(itemName)} on this team">${itemIcon(null, { size: "xs", mega: ph })} ${esc(itemName)}</span>`,
+    };
+  }
+  if (megaDraft || (entry?.megaSlot && !entry.megaSlot.fusion)) {
     const stone = entry?.megaSlot?.stoneName ?? "Mega Stone";
     return {
       badge: `<span class="hi-badge" title="${esc(stone)}: Mega Evolution uses this item slot">${itemIcon(null, { size: "sm", mega: entry?.megaSlot ?? true })}</span>`,
@@ -159,13 +211,14 @@ function loadoutSummary(t) {
   if (!state.held.enabled || !(state.saved[t] ?? []).length) return "";
   const lo = state.held.teams[t] ?? [];
   const held = lo.filter((m) => m.item).length;
-  const mega = lo.filter((m) => m.megaSlot).length;
-  const open = lo.length - held - mega;
+  const mega = lo.filter((m) => m.megaSlot && !m.megaSlot.fusion).length;
+  const fusionItems = lo.filter((m) => m.megaSlot?.fusion).map((m) => m.megaSlot.stoneName); // fusion forms
+  const open = lo.length - held - mega - fusionItems.length;
   const ids = lo.map((m) => m.item).filter(Boolean);
   const valid = new Set(ids).size === ids.length;
   return `<div class="hi-summary" role="status">
     <div class="hi-summary-icons" aria-hidden="true">${lo.map((m) => itemIcon(heldItem(m.item), { size: "sm", mega: m.megaSlot ?? false })).join("")}</div>
-    <p><b>Items ${held}/${lo.length}</b>${mega ? ` · ${mega} Mega Stone` : ""}${open ? ` · ${open} empty` : " · every slot equipped"} · ${valid ? "✓ all different" : "⚠ duplicate item"}</p>
+    <p><b>Items ${held}/${lo.length}</b>${mega ? ` · ${mega} Mega Stone` : ""}${fusionItems.length ? ` · ${esc(fusionItems.join(", "))}` : ""}${open ? ` · ${open} empty` : " · every slot equipped"} · ${valid ? "✓ all different" : "⚠ duplicate item"}</p>
     <p class="hi-summary-note">Items are permanent unlocks: one unlock works on every team, but only one Pokémon per team can hold it.</p>
   </div>`;
 }
@@ -193,14 +246,19 @@ function blockReason(t, s, { replaceAt = -1 } = {}) {
   // Casual and Ranked hold each Pokémon once (only the Showcase takes repeats).
   if (list.some((m) => m.id === s.id && m.variant === s.variant)) return { code: "on", short: "On this team", text: `${nameOf(s)} is already on your ${LABEL[t]}.` };
   if (list.length >= MAX) return { code: "full", short: "Team full", text: `Your ${LABEL[t]} is full (6/6). Remove a Pokémon first.` };
+  const clash = fusionClash(list, s);
+  if (clash) {
+    const fused = list.map(fusionOf).find(Boolean);
+    return { code: "fusion", short: "Fusion rule", title: `${fused?.name ?? "A fusion"} is on this team`, text: `${clash} A team with ${fused?.familyLabel ?? "a fusion"} can't also have ${fused ? familyNames(fused) : "its family"}.` };
+  }
   if (t === "battle" && isMythic(s.id)) {
-    const other = list.find((m) => isMythic(m.id));
+    const other = list.find(isMythicSlot);
     if (other) {
       return {
         code: "mythic",
         short: "Mythic limit",
         title: "One mythic-tier Pokémon per Ranked team",
-        text: `${species(s.id).name} can't join your Ranked team: it already has a mythic-tier Pokémon (${species(other.id).name}). Remove ${species(other.id).name} first, or add ${species(s.id).name} to your Casual team.`,
+        text: `${species(s.id).name} can't join your Ranked team: it already has a mythic-tier Pokémon (${slotName(other)}). Remove ${slotName(other)} first, or add ${species(s.id).name} to your Casual team.`,
       };
     }
   }
@@ -222,6 +280,8 @@ let focusAfter = null;
  * replace: swap out the Pokémon at that slot (drag onto a filled slot of a
  * full team). Same rules as the server.
  */
+/** The copy picker's Ranked line: every copy has the same Power there. */
+const rankedCopyNote = (t, s) => (t === "battle" ? `In Ranked, every copy has ${fmt(power50Of(s))} power at Lv ${BATTLE_LEVEL}. A higher real Level knows more moves.` : null);
 const trainedOf = (s) => state.trained[keyOf(s)] ?? [];
 
 function add(t, s, { at = null, replace = false } = {}) {
@@ -233,7 +293,7 @@ function add(t, s, { at = null, replace = false } = {}) {
     const used = list.map((m) => m.uid).filter(Boolean);
     const free = copiesOfLine(s.id, s.variant).filter((c) => !used.includes(c.uid));
     if (free.length > 1) {
-      chooseCopy({ userData: state, pokeId: s.id, variant: s.variant, name: species(s.id).name, exclude: used })
+      chooseCopy({ userData: state, pokeId: s.id, variant: s.variant, name: species(s.id).name, exclude: used, note: rankedCopyNote(t, s) })
         .then((uid) => { if (uid !== undefined) add(t, { ...s, uid }, { at, replace }); });
       return;
     }
@@ -313,11 +373,65 @@ function cycleMega(t, i) {
       toast(`One Mega per team: ${species(list[other].id).name} goes back to its base form.`);
       delete list[other].mega;
     }
+    // A fusion form takes the Mega slot too: it goes back to its base Pokémon.
+    const fused = isShowcase(t) ? -1 : list.findIndex((m, k) => k !== i && fusionOf(m));
+    if (fused >= 0) {
+      toast(`One Mega slot per team: ${slotName(list[fused])} goes back to ${species(list[fused].id).name}.`);
+      delete list[fused].form;
+    }
     s.mega = next;
   } else delete s.mega;
   state.draft[t] = list;
   announce(next ? `${species(s.id).name} ${isShowcase(t) ? "shows" : "will battle"} as ${megaCard(next)?.name ?? next}.` : `${species(s.id).name} ${isShowcase(t) ? "shows" : "will battle in"} its base form.`);
   focusAfter = `[data-act="mega"][data-team="${t}"][data-i="${i}"]`;
+  render();
+}
+
+/**
+ * The Form button (Kyurem, Necrozma): cycles the base form → each unlocked
+ * fusion form. On Casual and Ranked a fused Pokémon can't share the team with
+ * its family, and on Ranked it counts as mythic-tier: a form that breaks a
+ * rule is skipped, with a note (the server checks too).
+ */
+function cycleFusion(t, i) {
+  const list = team(t).map((s) => ({ ...s }));
+  const s = list[i];
+  if (!s) return;
+  const options = [null, ...fusionFormsFor(s).map((f) => f.id)];
+  const others = list.filter((_, k) => k !== i);
+  let next = options[(options.indexOf(s.form ?? null) + 1) % options.length];
+  if (next && !isShowcase(t)) {
+    const clash = fusionClash(others, { ...s, form: next });
+    const f = fusionOf({ form: next });
+    const mythic = t === "battle" && !isMythic(s.id) ? others.find(isMythicSlot) : null;
+    if (clash) {
+      toast(`${clash} Remove ${familyNames(f).replace(" or ", " and ")} from this team first.`);
+      next = null;
+    } else if (mythic) {
+      toast(`${f.name} counts as mythic-tier, and your Ranked team already has ${slotName(mythic)}. One mythic-tier Pokémon per Ranked team.`);
+      next = null;
+    }
+  }
+  if (next && !isShowcase(t)) {
+    // A fusion form uses the team's one Mega slot: a Mega or another fusion goes back to its base form.
+    const name = fusionOf({ form: next })?.name ?? "This fusion";
+    const mega = list.findIndex((m, k) => k !== i && m.mega && state.megaOn);
+    if (mega >= 0) {
+      toast(`${name} uses the team's Mega slot: ${species(list[mega].id).name} goes back to its base form.`);
+      delete list[mega].mega;
+    }
+    const fused = list.findIndex((m, k) => k !== i && fusionOf(m));
+    if (fused >= 0) {
+      toast(`${name} uses the team's Mega slot: ${slotName(list[fused])} goes back to ${species(list[fused].id).name}.`);
+      delete list[fused].form;
+    }
+  }
+  if (next) s.form = next;
+  else delete s.form;
+  state.draft[t] = list;
+  const base = species(s.id).name;
+  announce(next ? `${base} ${isShowcase(t) ? "shows" : "will battle"} as ${fusionOf(s)?.name ?? next}.` : `${base} ${isShowcase(t) ? "shows" : "will battle"} as ${base}.`);
+  focusAfter = `[data-act="fusion"][data-team="${t}"][data-i="${i}"]`;
   render();
 }
 
@@ -327,7 +441,7 @@ const SOURCES = { showcase: ["display", "battle"], display: ["battle", "showcase
 /**
  * Copy the other team onto team `target`, after a confirmation: the same
  * Pokémon in the same order with their Mega choices; on Save the server
- * also copies each copied Pokémon's moves (copyFrom). Into the Battle team,
+ * also copies each copied Pokémon's moves, Ability and held item (copyFrom). Into the Battle team,
  * only the first mythic-tier Pokémon comes along. Nothing is saved here.
  */
 async function copyFrom(target, source = SOURCES[target].find((t) => team(t).length)) {
@@ -343,14 +457,17 @@ async function copyFrom(target, source = SOURCES[target].find((t) => team(t).len
     if (!isShowcase(target)) {
       if (lines.has(keyOf(s))) { dropped.push({ s, why: "already on the team" }); continue; }
       if (target === "battle" && isSpecial(s.variant)) { dropped.push({ s, why: "can't join the Ranked team" }); continue; }
-      if (target === "battle" && isMythic(s.id) && mythics++ >= 1) { dropped.push({ s, why: "one mythic-tier Pokémon per Ranked team" }); continue; }
+      if (target === "battle" && isMythicSlot(s) && mythics++ >= 1) { dropped.push({ s, why: "one mythic-tier Pokémon per Ranked team" }); continue; }
       if (s.mega && megas++ >= 1) delete s.mega; // one Mega per team: the rest come as their base form
+      if (fusionOf(s) && megas++ >= 1) delete s.form; // a fusion form uses that same Mega slot
+      if (s.form && fusionClash(kept, s)) delete s.form; // a fusion form beside its family: the base Pokémon
+      if (!s.form && fusionClash(kept, s)) { const f = kept.find((m) => fusionOf(m)); if (f) delete f.form; }
       lines.add(keyOf(s)); // each Pokémon once on Casual and Ranked
     }
     kept.push(s);
   }
   const current = state.draft[target];
-  const movesNote = isShowcase(source) || isShowcase(target) ? "Moves and held items aren't copied (the Showcase has none)." : `Each Pokémon brings its ${LABEL[source]} moves.`;
+  const movesNote = isShowcase(source) || isShowcase(target) ? "Moves, Abilities and held items aren't copied (the Showcase has none)." : `Each Pokémon brings its ${LABEL[source]} moves, Ability and held item.`;
   const msg = [
     current?.length ? `This replaces your ${LABEL[target]} (${current.length} Pokémon). ${movesNote}` : `This fills your ${LABEL[target]}. ${movesNote}`,
     isDirty(target) ? `Your unsaved changes to the ${LABEL[target]} will be replaced.` : "",
@@ -365,7 +482,7 @@ async function copyFrom(target, source = SOURCES[target].find((t) => team(t).len
   });
   if (!ok) return;
   state.draft[target] = kept;
-  // Moves come along only between the two fighting teams.
+  // Moves, Abilities and held items come along only between the two fighting teams.
   state.copied[target] = isShowcase(source) || isShowcase(target) ? null : { source, keys: kept.map(keyOf) };
   state.error[target] = null;
   state.active = target;
@@ -419,11 +536,13 @@ async function save() {
       state.copied[t] = null;
       if (body.saveDelayed || body.saved === false) toast(body.notice || "Saved with a delay. Your change is kept and will be written shortly.");
       if (Array.isArray(body.itemsCleared) && body.itemsCleared.length) {
-        const why = body.itemsCleared.some((c) => c.reason === "mega_slot") ? " (Mega Evolution uses the item slot)" : "";
+        const why = body.itemsCleared.some((c) => c.reason === "mega_slot") ? " (Mega Evolution uses the item slot)"
+          : body.itemsCleared.some((c) => c.reason === "fusion_slot") ? " (a fusion form's fusion item uses the item slot)" : "";
         toast(`${body.itemsCleared.length} item${body.itemsCleared.length > 1 ? "s" : ""} came off your ${LABEL[t]}${why}. Your unlocks are kept.`);
       }
     }
     await refreshHeld();
+    if (state.plans.enabled) state.plans = await loadPlans(userId).catch(() => state.plans); // a new lineup can change readiness
     toast(dirty.length > 1 ? "Teams saved." : `${LABEL[dirty[0]]} saved.`, { tone: "success" });
   } catch (err) {
     if (err.team) {
@@ -447,9 +566,11 @@ function copyPayload(t) {
 }
 
 /** Hide the Battle team notices and tell the server they were seen. */
+// Ranked-team notices show on the Ranked tab; fusion-form ones on every tab.
+const noticesFor = (t) => state.notices.filter((n) => n.kind === "fusion_revert" || t === "battle");
 async function dismissNotices() {
-  const ids = state.notices.map((n) => n.id);
-  state.notices = [];
+  const ids = noticesFor(state.active).map((n) => n.id);
+  state.notices = state.notices.filter((n) => !ids.includes(n.id));
   render();
   try {
     const res = await fetch("/api/dismiss-notices", {
@@ -476,12 +597,13 @@ function slotCard(t, s, i) {
   const wasAt = savedList.findIndex((m) => (s.uid && m.uid ? m.uid === s.uid : keyOf(m) === keyOf(s)));
   const change = wasAt === -1 ? "New" : wasAt !== i ? "Moved" : null;
   const lvl = isB
-    ? `<span class="tm-lv tm-lv--fixed" title="Ranked and wager battles use Lv ${BATTLE_LEVEL}"><b>Lv ${BATTLE_LEVEL}</b><small>yours Lv ${levelOf(s)}</small></span>`
+    ? `<span class="tm-lv tm-lv--fixed" title="Ranked and wager battles use Lv ${BATTLE_LEVEL}"><b>Lv ${BATTLE_LEVEL}</b><small title="It fights at Lv ${BATTLE_LEVEL} but knows only the moves learned by its real Level">${fmt(power50Of(s))} power · yours Lv ${levelOf(s)}</small></span>`
     : `<span class="tm-lv"><b>Lv ${levelOf(s)}</b></span>`;
   const tags = [
     i === 0 && !sc ? `<span class="tm-tag tm-tag--lead">Lead</span>` : "",
     s.mega && state.megaOn ? `<span class="tm-tag tm-tag--mega">Mega</span>` : "",
-    isMythic(s.id) ? `<span class="cc-tier" data-tier="mythic">Mythic</span>` : "",
+    fusionOf(s) ? `<span class="tm-tag tm-tag--fusion" title="${esc(species(s.id).name)} fused with ${esc(fusionOf(s).partnerName)}">Fusion</span>` : "",
+    isMythicSlot(s) ? `<span class="cc-tier" data-tier="mythic">Mythic</span>` : "",
     change ? `<span class="tm-tag tm-tag--change">${change}</span>` : "",
     isTrainedCopy(s) ? `<span class="tm-tag tm-tag--trained" title="This copy learned moves from TMs">★ Trained</span>` : "",
   ].join("");
@@ -498,12 +620,13 @@ function slotCard(t, s, i) {
     <div class="tm-slot-body">
       <div class="tm-slot-name" data-act="details" data-team="${t}" data-i="${i}">${esc(name)}</div>
       <div class="tm-slot-meta">${lvl}</div>
-      ${typeChips(s.id)}
+      ${slotTypeChips(s)}
       <div class="tm-slot-tags">${tags}</div>
       ${sc ? "" : `<button type="button" class="tm-movesbtn" data-act="moves" data-team="${t}" data-i="${i}" aria-label="${esc(species(s.id).name)}'s moves on your ${LABEL[t]}">Moves</button>`}
       ${copies > 1 ? `<button type="button" class="tm-movesbtn" data-act="pickcopy" data-team="${t}" data-i="${i}" aria-label="Change which ${esc(species(s.id).name)} is in this slot (you have ${copies})">Change copy</button>` : ""}
       ${ic.button}
       ${state.megaOn && megaFormsFor(s).length ? `<button type="button" class="tm-megabtn${s.mega ? " is-on" : ""}" data-act="mega" data-team="${t}" data-i="${i}" aria-label="Mega form for ${esc(species(s.id).name)}: ${s.mega ? esc(megaCard(s.mega)?.name ?? s.mega) : "off"}. Change">${s.mega ? `Mega: ${esc((megaCard(s.mega)?.name ?? s.mega).replace(/^Mega /, ""))}` : "Mega: off"}</button>` : ""}
+      ${fusionFormsFor(s).length ? `<button type="button" class="tm-megabtn tm-fusionbtn${fusionOf(s) ? " is-on" : ""}" data-act="fusion" data-team="${t}" data-i="${i}" aria-label="Form for ${esc(species(s.id).name)}: ${fusionOf(s) ? esc(fusionOf(s).name) : esc(species(s.id).name)}. Change">Form: ${fusionOf(s) ? esc(fusionOf(s).shortName) : esc(species(s.id).name)}</button>` : ""}
     </div>
     <div class="tm-slot-ctl">
       <span class="tm-grip" title="Drag to reorder"><svg class="tm-ic" aria-hidden="true"><use href="#tm-grip"/></svg></span>
@@ -514,16 +637,73 @@ function slotCard(t, s, i) {
   </li>`;
 }
 
+// ---------- Team check ----------
+const fmtN = (n) => Number(n).toLocaleString("en-US");
+function teamCheckPanel() {
+  const c = state.check;
+  const d = c.data;
+  const summary = d?.headline ? esc(d.headline.text) : d ? "No big shared weakness." : c.failed ? "Couldn't load the team check." : "Checking…";
+  let body = "";
+  if (d) {
+    const rows = [...d.weaknesses].filter((w) => w.weak || w.resist || w.immune)
+      .sort((a, b) => b.weak - a.weak || (a.resist + a.immune) - (b.resist + b.immune)).slice(0, 8);
+    const cell = (n, cls) => `<td class="${n ? cls : "is-zero"}">${n}</td>`;
+    body = `
+      ${d.headline?.tryTypes?.length ? `<p class="tm-check-tip">Types that resist ${esc(d.headline.type)}: ${d.headline.tryTypes.map((x) => `<span class="cc-type" data-type="${esc(x.toLowerCase())}">${esc(x)}</span>`).join(" ")}</p>` : ""}
+      <div class="tm-check-scroll"><table class="tm-check-table">
+        <thead><tr><th scope="row">Attack</th>${rows.map((w) => `<th scope="col"><span class="cc-type" data-type="${esc(w.type.toLowerCase())}">${esc(w.type)}</span></th>`).join("")}</tr></thead>
+        <tbody>
+          <tr><th scope="row">Weak ×2+</th>${rows.map((w) => cell(w.weak, "is-weak")).join("")}</tr>
+          <tr><th scope="row">Resist</th>${rows.map((w) => cell(w.resist, "is-resist")).join("")}</tr>
+          <tr><th scope="row">Immune</th>${rows.map((w) => cell(w.immune, "is-resist")).join("")}</tr>
+        </tbody></table></div>
+      <h4>Moves picked</h4>
+      <p class="tm-check-types">${d.moves.types.map((x) => `<span class="cc-type" data-type="${esc(x.type.toLowerCase())}">${esc(x.type)} ×${x.count}</span>`).join(" ") || "No damaging moves."}</p>
+      <p class="tm-sub">Physical ${d.moves.mix.Physical} · Special ${d.moves.mix.Special} · Status ${d.moves.mix.Status}${d.moves.noSuperEffective.length ? `. Nothing hits ${d.moves.noSuperEffective.map(esc).join(", ")} for ×2.` : ""}</p>
+      <h4>Speed${d.level ? ` at Lv ${d.level}` : ""} (who moves first)</h4>
+      <p class="tm-sub">${d.speed.map((x) => `${esc(x.name)} ${fmtN(x.speed)}`).join(" · ")}</p>
+      <p class="tm-sub tm-check-note">Type matchups only; abilities aren't counted. Includes unsaved changes.</p>`;
+  }
+  return `<details class="tm-check" id="teamCheck"${c.open ? " open" : ""}>
+    <summary><span class="tm-check-title">Team check</span><span class="tm-check-head">${summary}</span></summary>${body}</details>`;
+}
+let checkTimer = null;
+/** Ask the server for the check of the team on screen (debounced; only when the team changed). */
+function scheduleCheck() {
+  const t = state.active;
+  if (isShowcase(t) || !team(t).length) return;
+  const slots = team(t).map((s) => ({ id: s.id, variant: s.variant, ...(s.mega && state.megaOn ? { mega: s.mega } : {}), ...(fusionOf(s) ? { form: s.form } : {}), ...(s.uid ? { uid: s.uid } : {}) }));
+  const key = JSON.stringify([t, slots]);
+  if (key === state.check.key) return;
+  state.check = { ...state.check, key, data: null, failed: false };
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(async () => {
+    try {
+      const r = await fetch("/api/team-check", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: userId, team: t, slots }) });
+      const d = r.ok ? await r.json() : null;
+      if (state.check.key !== key) return; // the team changed meanwhile
+      state.check.data = d;
+      state.check.failed = !d;
+    } catch { if (state.check.key === key) state.check.failed = true; }
+    const el = document.getElementById("teamCheck");
+    if (el) { el.outerHTML = teamCheckPanel(); }
+  }, 250);
+}
+app.addEventListener("toggle", (e) => { if (e.target.id === "teamCheck") state.check.open = e.target.open; }, true);
+
 function rules() {
   const list = team("battle");
-  const mythic = list.filter((s) => isMythic(s.id)).length;
-  const mega = state.megaOn ? list.filter((s) => s.mega).length : 0;
+  const mythic = list.filter(isMythicSlot).length;
+  // The one Mega slot: a Mega or a fusion form (Mega-level stat totals).
+  const mega = (state.megaOn ? list.filter((s) => s.mega).length : 0) + list.filter((s) => fusionOf(s)).length;
+  const showMega = state.megaOn || state.fusion.enabled;
   const err = !!state.error.battle;
   return `<ul class="tm-rules" aria-label="Ranked team rules">
     <li class="tm-rule"><svg class="tm-ic" aria-hidden="true"><use href="#tm-swords"/></svg>Battles at <b>Lv ${BATTLE_LEVEL}</b></li>
     <li class="tm-rule${err ? " is-error" : mythic >= 1 ? " is-full" : ""}">Mythic <b>${mythic}/1</b></li>
-    ${state.megaOn ? `<li class="tm-rule${mega >= 1 ? " is-full" : ""}">Mega <b>${mega}/1</b></li>` : ""}
+    ${showMega ? `<li class="tm-rule${mega >= 1 ? " is-full" : ""}" title="One Mega or fusion form (Black/White Kyurem, Dusk Mane/Dawn Wings Necrozma) per team">Mega slot <b>${mega}/1</b></li>` : ""}
     <li class="tm-rule">Slots <b>${list.length}/6</b></li>
+    ${list.length ? `<li class="tm-rule">Team power at Lv ${BATTLE_LEVEL} <b>${fmt(list.reduce((n, s) => n + power50Of(s), 0))}</b>${powerInfoButton()}</li>` : ""}
   </ul>`;
 }
 
@@ -550,8 +730,9 @@ function teamPanel() {
   } else {
     body = `<ol class="tm-slots">${Array.from({ length: MAX }, (_, i) => slotCard(t, list[i] ?? null, i)).join("")}</ol>`;
   }
-  const note = isB && state.notices.length
-    ? `<div class="tm-notice" role="status"><p>${state.notices.map((n) => esc(n.text)).join("<br>")}</p><button type="button" class="cc-btn" data-act="dismiss">Got it</button></div>`
+  const shownNotices = noticesFor(t);
+  const note = shownNotices.length
+    ? `<div class="tm-notice" role="status"><p>${shownNotices.map((n) => esc(n.text)).join("<br>")}</p><button type="button" class="cc-btn" data-act="dismiss">Got it</button></div>`
     : "";
   const e = state.error[t];
   const err = e ? `<div class="tm-error" role="alert"><svg class="tm-ic" aria-hidden="true"><use href="#tm-lock"/></svg><p><strong>${esc(e.title ?? "Can't add that Pokémon")}</strong>${esc(e.text)}</p></div>` : "";
@@ -559,7 +740,7 @@ function teamPanel() {
     ? SOURCES[t].filter((o) => team(o).length).map((o) => `<button type="button" class="cc-btn tm-copyteam" data-act="copy" data-team="${t}" data-source="${o}">Copy from ${LABEL[o].replace(" team", "")}</button>`).join("")
     : "";
   return `<section id="teamPanel" class="tm-panel tm-panel--${t} tm-team" role="tabpanel" aria-labelledby="tab-${t}">
-    <div class="tm-panel-head">${head}<div class="tm-copyteams">${copyBtn}</div></div>${note}${isShowcase(t) ? "" : loadoutSummary(t)}${body}${err}
+    <div class="tm-panel-head">${head}<div class="tm-copyteams">${copyBtn}</div></div>${note}${isShowcase(t) ? "" : loadoutSummary(t)}${isShowcase(t) ? "" : planRowHtml(t, state.plans)}${body}${err}${isShowcase(t) || !list.length ? "" : teamCheckPanel()}
     <button type="button" class="cc-btn tm-addbtn" data-act="openbox"><svg class="tm-ic" aria-hidden="true"><use href="#tm-plus"/></svg>Add from your box</button>
   </section>`;
 }
@@ -590,6 +771,7 @@ function boxItems() {
   }
   for (const r of specials) out.push({ id: r[1], variant: r[8], count: 1 });
   const { q, show, sort } = state.filter;
+  const ranked = state.active === "battle";
   const qq = q.trim().toLowerCase();
   const list = out.filter((s) => {
     if (show === "shiny" && s.variant !== "shiny") return false;
@@ -598,7 +780,10 @@ function boxItems() {
     return true;
   });
   const by = {
-    power: (a, b) => powerOf(b) - powerOf(a) || a.id - b.id,
+    // Ranked fights at Lv 50: sort on that, then real Level (it decides the moves).
+    power: ranked
+      ? (a, b) => power50Of(b) - power50Of(a) || (Number(levelOf(b)) || 0) - (Number(levelOf(a)) || 0) || a.id - b.id
+      : (a, b) => powerOf(b) - powerOf(a) || a.id - b.id,
     level: (a, b) => (Number(levelOf(b)) || 0) - (Number(levelOf(a)) || 0) || a.id - b.id,
     dex: (a, b) => a.id - b.id || (a.variant === "shiny") - (b.variant === "shiny"),
     name: (a, b) => nameOf(a).localeCompare(nameOf(b)),
@@ -613,7 +798,8 @@ function boxTile(s) {
   const shiny = s.variant === "shiny";
   const blocked = why && (why.code === "mythic" || why.code === "special");
   const n = copiesOfLine(s.id, s.variant).length;
-  const label = `${nameOf(s)}${shiny ? " (shiny)" : ""}, Lv ${levelOf(s)}${n > 1 ? `, you have ${n}` : ""}${why ? `. ${why.short}` : `. Add to your ${LABEL[t]}`}`;
+  const ranked = t === "battle";
+  const label = `${nameOf(s)}${shiny ? " (shiny)" : ""}, ${ranked ? `${fmt(power50Of(s))} power at Lv ${BATTLE_LEVEL}, yours Lv ${levelOf(s)}` : `Lv ${levelOf(s)}`}${n > 1 ? `, you have ${n}` : ""}${why ? `. ${why.short}` : `. Add to your ${LABEL[t]}`}`;
   return `<li class="tm-tile${shiny ? " is-shiny" : ""}${blocked ? " is-blocked" : ""}${why?.code === "on" ? " is-on" : ""}">
     <button type="button" class="tm-tile-btn" data-act="add" data-id="${s.id}" data-variant="${s.variant}" aria-label="${esc(label)}" draggable="true">
       <span class="tm-tile-badges">${badges}</span>
@@ -622,29 +808,47 @@ function boxTile(s) {
       <span class="tm-tile-art"${shiny ? ` data-fx="shiny" data-fx-seed="${s.id}"` : ""}><img class="cc-sprite" src="${spriteOf(s)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/public/sprites/items/pokeball.png'"></span>
       <span class="tm-tile-name">${esc(nameOf(s))}</span>
       ${typeChips(s.id)}
-      <span class="tm-tile-lv">Lv ${levelOf(s)}${n > 1 ? ` · ×${n}` : ""}${isMythic(s.id) && !blocked ? ` · <b class="tier-text mythic">Mythic</b>` : ""}</span>
+      ${ranked ? `<span class="tm-tile-pw"><b>${fmt(power50Of(s))}</b> at Lv ${BATTLE_LEVEL}</span>` : ""}
+      <span class="tm-tile-lv"${ranked ? ` title="Fights at Lv ${BATTLE_LEVEL}, knows the moves learned by Lv ${levelOf(s)}"` : ""}>${ranked ? "yours " : ""}Lv ${levelOf(s)}${n > 1 ? ` · ×${n}` : ""}${isMythic(s.id) && !blocked ? ` · <b class="tier-text mythic">Mythic</b>` : ""}</span>
     </button>
     <button type="button" class="tm-tile-info" data-act="details-box" data-id="${s.id}" data-variant="${s.variant}" aria-label="${esc(nameOf(s))}${shiny ? " (shiny)" : ""}: details">i</button></li>`;
 }
 
 function boxPanel(where) {
   const t = state.active;
-  const items = boxItems();
   const f = state.filter;
   const seg = (v, label) => `<button type="button" data-act="show" data-show="${v}" aria-pressed="${f.show === v}">${label}</button>`;
   return `<div class="tm-panel-head"><div>${where === "sheet" ? "" : `<h2 class="tm-h2" id="boxHeading">Add to ${LABEL[t]}</h2>`}
-      <p class="tm-sub">Tap to add.${t === "battle" ? " Locked: would break a Ranked team rule." : ""} S = Showcase, C = Casual, R = Ranked slot.</p></div></div>
+      <p class="tm-sub">Tap to add.${t === "battle" ? ` Locked: would break a Ranked team rule. Power is at Lv ${BATTLE_LEVEL}, the Level Ranked battles use. ${powerInfoButton()}` : ""} S = Showcase, C = Casual, R = Ranked slot.</p></div></div>
     <div class="tm-boxbar">
       <label class="sr-only" for="boxSearch-${where}">Search your Pokémon</label>
       <input id="boxSearch-${where}" type="search" placeholder="Search…" value="${esc(f.q)}" data-act="search" autocomplete="off">
       <label class="sr-only" for="boxSort-${where}">Sort</label>
       <select id="boxSort-${where}" data-act="sort">
-        ${[["power", "Power"], ["level", "Level"], ["dex", "Pokédex #"], ["name", "Name"]].map(([v, l]) => `<option value="${v}"${f.sort === v ? " selected" : ""}>Sort: ${l}</option>`).join("")}
+        ${[["power", t === "battle" ? `Power at Lv ${BATTLE_LEVEL}` : "Power"], ["level", "Level"], ["dex", "Pokédex #"], ["name", "Name"]].map(([v, l]) => `<option value="${v}"${f.sort === v ? " selected" : ""}>Sort: ${l}</option>`).join("")}
       </select>
       <div class="tm-seg" role="group" aria-label="Show">${seg("all", "All")}${seg("shiny", "Shiny")}${seg("free", "Not on a team")}</div>
     </div>
-    ${items.length ? `<ul class="tm-box">${items.map(boxTile).join("")}</ul>` : `<p class="cc-empty">${Object.keys(state.pokemon).length ? "No Pokémon match." : "You haven't caught any Pokémon yet. Try /daily in Discord."}</p>`}`;
+    <div class="tm-boxlist" data-boxlist="${where}">${boxList()}</div>`;
 }
+
+function boxList(items = boxItems()) {
+  return items.length ? `<ul class="tm-box">${items.map(boxTile).join("")}</ul>` : `<p class="cc-empty">${Object.keys(state.pokemon).length ? "No Pokémon match." : "You haven't caught any Pokémon yet. Try /daily in Discord."}</p>`;
+}
+
+/** Search, sort and Show change only the box: redraw its list, not the page. */
+function refreshBox() {
+  const html = boxList();
+  for (const list of document.querySelectorAll("[data-boxlist]")) {
+    list.innerHTML = html;
+    scanFx(list);
+  }
+  for (const b of document.querySelectorAll('[data-act="show"]')) b.setAttribute("aria-pressed", String(b.dataset.show === state.filter.show));
+  for (const sel of document.querySelectorAll('[data-act="sort"]')) sel.value = state.filter.sort;
+  for (const q of document.querySelectorAll('[data-act="search"]')) if (q !== document.activeElement) q.value = state.filter.q;
+}
+const refreshBoxSoon = debounce(refreshBox, 120);
+const rememberFilter = () => view.set({ q: state.filter.q, show: state.filter.show, sort: state.filter.sort });
 
 function saveBar() {
   if (!anyDirty()) return "";
@@ -656,6 +860,9 @@ function saveBar() {
     const bits = [];
     if (added.length) bits.push(`added ${added.join(", ")}`);
     if (removed.length) bits.push(`removed ${removed.join(", ")}`);
+    // A Mega or fusion form switched on a Pokémon already on the team.
+    const reformed = b.filter((s) => { const m = a.find((x) => keyOf(x) === keyOf(s)); return m && ((m.form ?? null) !== (s.form ?? null) || (m.mega ?? null) !== (s.mega ?? null)); });
+    if (reformed.length) bits.push(`new form for ${reformed.map((s) => species(s.id).name).join(", ")}`);
     if (!bits.length) bits.push("new order");
     return `${LABEL[t]}: ${bits.join(" · ")}`;
   });
@@ -683,9 +890,12 @@ document.body.insertAdjacentHTML("afterbegin", ICONS);
 
 function render() {
   const searchFocus = document.activeElement?.dataset?.act === "search" ? { where: document.activeElement.id, pos: document.activeElement.selectionStart } : null;
-  app.innerHTML = `${switcher()}<div class="tm-layout">${teamPanel()}<aside class="tm-panel tm-boxpanel" aria-labelledby="boxHeading">${boxPanel("side")}</aside></div>${saveBar()}`;
+  app.innerHTML = `${switcher()}<div class="tm-layout">${teamPanel()}<aside class="tm-panel tm-boxpanel" aria-labelledby="boxHeading">${NARROW.matches ? "" : boxPanel("side")}</aside></div>${saveBar()}`;
+  if (view.get().active !== state.active) view.set({ active: state.active });
+  if (new URLSearchParams(location.search).get("team") !== state.active) setUrlParam("team", state.active);
   if (sheet.open) { sheetBody.innerHTML = boxPanel("sheet"); scanFx(sheetBody); }
   scanFx(app); // shiny backdrops (same as the Discord cards)
+  scheduleCheck();
   document.getElementById("boxSheetTitle").textContent = `Add to your ${LABEL[state.active]}`;
   if (focusAfter) {
     const el = [focusAfter].flat().map((s) => document.querySelector(s)).find((x) => x && !x.disabled);
@@ -712,11 +922,12 @@ function onClick(e) {
   else if (act === "details") openTeamDetails(t, i);
   else if (act === "details-box") openBoxDetails({ id: Number(el.dataset.id), variant: el.dataset.variant });
   else if (act === "mega") cycleMega(t, i);
+  else if (act === "fusion") cycleFusion(t, i);
   else if (act === "pickcopy") {
     const s = team(t)[i];
     if (s) {
       const others = team(t).filter((_, k) => k !== i).map((m) => m.uid).filter(Boolean);
-      chooseCopy({ userData: state, pokeId: s.id, variant: s.variant, name: species(s.id).name, current: s.uid ?? null, exclude: others })
+      chooseCopy({ userData: state, pokeId: s.id, variant: s.variant, name: species(s.id).name, current: s.uid ?? null, exclude: others, note: rankedCopyNote(t, s) })
         .then((uid) => {
           if (uid === undefined) return;
           const list = [...team(t)];
@@ -746,18 +957,51 @@ function onClick(e) {
   }
   else if (act === "moves") {
     const s = team(t)[i];
-    if (s) openMovesEditor({ userId, team: t, s, name: species(s.id).name, onSaved: () => render(), onTaught: () => refreshCopies() });
+    if (s) openMovesEditor({ userId, team: t, s: fusionOf(s) ? s : { ...s, form: undefined }, name: slotName(s), recommended: recommendedFor(state.plans, t, s), onSaved: () => refreshPlans(), onTaught: () => { refreshCopies(); refreshPlans(); } });
   }
   else if (act === "discard") discard();
   else if (act === "save") save();
-  else if (act === "show") { state.filter.show = el.dataset.show; render(); }
+  else if (act === "show") { state.filter.show = el.dataset.show; rememberFilter(); refreshBox(); }
   else if (act === "openbox") openSheet();
   else if (act === "dismiss") dismissNotices();
 }
+// Plans are saved at once (not with the team's Save bar): a plan isn't part of the team's slots.
+async function refreshPlans() {
+  try { state.plans = await loadPlans(userId); } catch { /* keep what's shown */ }
+  render();
+}
+async function choosePlan(team, plan) {
+  // Pokémon on Automatic whose ability this plan changes: list them and ask first.
+  const changes = abilityChanges(state.plans, team, plan);
+  if (changes.length) {
+    const planName = state.plans.plans.find((p) => p.id === plan)?.name ?? plan;
+    const ok = await confirmDialog({
+      title: `Switch to ${planName}?`,
+      message: [
+        `${changes.length === 1 ? "This Pokémon's ability changes" : `${changes.length} Pokémon change ability`} on your ${LABEL[team]}:`,
+        ...changes.map((c) => `• ${species(c.speciesId).name}${c.variant === "shiny" ? " ✨" : ""}: ${c.from} → ${c.to}`),
+        "Their ability is set to Automatic. To keep one, choose it in Edit moves & ability.",
+      ].join("\n"),
+      okText: "Switch plan",
+      cancelText: "Cancel",
+    });
+    if (!ok) return render(); // puts the menu back on the current plan
+  }
+  try {
+    state.plans.teams[team] = await savePlan(userId, team, plan);
+    toast("Battle plan saved", { tone: "success" });
+  } catch (err) {
+    if (err.status === 403) return showExpired();
+    showActionError(err, "Couldn’t save the Battle plan");
+  }
+  render();
+}
+
 function onInput(e) {
   const el = e.target;
-  if (el.dataset?.act === "search") { state.filter.q = el.value; render(); }
-  if (el.dataset?.act === "sort") { state.filter.sort = el.value; render(); }
+  if (e.type === "change" && el.dataset?.act === "plan") return choosePlan(el.dataset.team, el.value);
+  if (el.dataset?.act === "search") { state.filter.q = el.value; rememberFilter(); refreshBoxSoon(); }
+  if (el.dataset?.act === "sort") { state.filter.sort = el.value; rememberFilter(); refreshBox(); }
 }
 app.addEventListener("click", onClick);
 app.addEventListener("input", onInput);
@@ -930,7 +1174,7 @@ async function refreshCopies() {
 }
 
 // ---------- Pokémon details (the Collection's drawer) ----------
-const collectionHref = (id, variant) => `/public/picker-pokemon/?${new URLSearchParams({ id: userId, pokemon: id, variant })}`;
+const collectionHref = (id, variant, uid = null) => `/public/picker-pokemon/?${new URLSearchParams({ id: userId, pokemon: id, variant, ...(uid ? { copy: uid } : {}) })}`;
 const apiJSON = async (url) => {
   const res = await fetch(url, { credentials: "same-origin" });
   let body = {};
@@ -947,22 +1191,26 @@ const slotsOnScreen = (id) => (variant) => {
   return { display, battle, unsaved: display !== savedAt("display") || battle !== savedAt("battle") };
 };
 
-/** From a team card: stats (Lv 50 first on the Battle team), Edit moves, Open in Collection. */
+/** From a team card: stats (Lv 50 first on the Battle team), Edit moves (and ability, full sim), Open in Collection. */
 function openTeamDetails(t, i) {
   const s = team(t)[i];
   if (!s) return;
   openDetail(s.id, {
     userId,
     apiJSON,
-    actionsHTML: () => `<button type="button" class="cc-btn" data-act="moves">Edit moves</button>
+    actionsHTML: (d, variant) => `<button type="button" class="cc-btn" data-act="moves">${d.copies?.[variant]?.ability ? "Edit moves &amp; ability" : "Edit moves"}</button>
       <button type="button" class="cc-btn" data-act="collection">Open in Collection</button>`,
     onAction: (act, d, variant) => {
       // The slot's own copy (TM system): its trained copy when the variant matches the slot.
-      if (act === "moves") openMovesEditor({ userId, team: t, s: { id: d.id, variant, ...(variant === s.variant && s.uid ? { uid: s.uid } : {}) }, name: species(d.id).name, onSaved: () => render(), onTaught: () => refreshCopies() });
-      else if (act === "collection") leaveTo(collectionHref(d.id, variant));
+      if (act === "moves") {
+        const slot = { id: d.id, variant, ...(variant === s.variant && s.uid ? { uid: s.uid } : {}), ...(variant === s.variant && fusionOf(s) ? { form: s.form } : {}) };
+        openMovesEditor({ userId, team: t, s: slot, name: species(d.id).name, recommended: recommendedFor(state.plans, t, slot), onSaved: () => refreshPlans(), onTaught: () => { refreshCopies(); refreshPlans(); } });
+      }
+      else if (act === "collection") leaveTo(collectionHref(d.id, variant, variant === s.variant ? s.uid : null));
     },
   }, {
     variant: s.variant,
+    uid: s.uid ?? null, // this slot's copy: its Level and equipped moves (what it battles with)
     level: t === "battle" ? "50" : "real",
     slotsFor: slotsOnScreen(s.id),
     megaName: s.mega && state.megaOn ? slotName(s) : null,
@@ -991,6 +1239,11 @@ function openBoxDetails(s) {
 // ---------- load ----------
 async function load() {
   if (!userId) { app.innerHTML = ""; return; }
+  // Mega cards and held items start with the main data, not after it: each
+  // step in a row costs a round trip on a phone (dashboard UX audit).
+  const megaP = fetch(`/api/mega?id=${encodeURIComponent(userId)}`, { credentials: "same-origin" })
+    .then((m) => (m.ok ? m.json() : null)).catch(() => null);
+  const heldP = refreshHeld();
   try {
     const [pdRes, userRes] = await Promise.all([
       fetch("/public/pokemonData.json", { credentials: "same-origin" }),
@@ -1008,29 +1261,31 @@ async function load() {
     state.pokemon = u.pokemon ?? {};
     state.levels = u.levels ?? {};
     state.powers = u.powers ?? {};
+    state.powers50 = u.powers50 ?? {};
     state.trained = u.trained ?? {};
     state.copies = Array.isArray(u.copies) ? u.copies : [];
     const norm = (list) => (Array.isArray(list) ? list.map(slotFromServer) : null);
     state.saved = { showcase: norm(u.showcaseTeam) ?? [], display: norm(u.currentTeam) ?? [], battle: norm(u.battleTeam) };
-    state.notices = Array.isArray(u.notices) ? u.notices.filter((n) => n.kind === "battle_team_trim") : [];
+    state.notices = Array.isArray(u.notices) ? u.notices.filter((n) => n.kind === "battle_team_trim" || n.kind === "fusion_revert") : [];
+    state.fusion = u.fusion?.enabled && Array.isArray(u.fusion.forms) ? u.fusion : { enabled: false, forms: [] };
     state.draft = clone(state.saved);
     const want = new URLSearchParams(location.search).get("team");
-    state.active = TEAMS.includes(want) ? want : state.notices.length ? "battle" : "display";
+    const kept = view.get();
+    state.filter = { q: kept.q, show: ["all", "shiny", "free"].includes(kept.show) ? kept.show : "all", sort: ["power", "level", "dex", "name"].includes(kept.sort) ? kept.sort : "power" };
+    // The link's ?team= first, then a notice about the Ranked team, then the last team viewed.
+    state.active = TEAMS.includes(want) ? want : state.notices.some((n) => n.kind === "battle_team_trim") ? "battle" : TEAMS.includes(kept.active) ? kept.active : "display";
   } catch (err) {
     app.innerHTML = "";
     showBanner(err?.message || "Couldn't load your teams. Please try again.", { title: "Couldn't load your teams" });
     return;
   }
   // Mega sprites only while Mega Evolution is switched on server-side.
-  try {
-    const m = await fetch(`/api/mega?id=${encodeURIComponent(userId)}`, { credentials: "same-origin" });
-    const md = m.ok ? await m.json() : null;
-    state.megaOn = !!md?.enabled;
-    state.megaCards = state.megaOn && Array.isArray(md.cards) ? md.cards : [];
-  } catch { state.megaOn = false; }
+  const md = await megaP;
+  state.megaOn = !!md?.enabled;
+  state.megaCards = state.megaOn && Array.isArray(md.cards) ? md.cards : [];
   // Held items (only while switched on server-side). The eight free starter
   // unlocks are claimed on the first visit (idempotent on the server).
-  await refreshHeld();
+  await heldP;
   if (state.held.enabled && state.held.starterPending) {
     try {
       const r = await claimStarter(userId);
@@ -1038,7 +1293,11 @@ async function load() {
       if (r.granted?.length) toast(`You unlocked ${r.granted.length} free held items! Equip them with the Item button on each Pokémon.`, { tone: "success" });
     } catch (err) { if (!err.silent) showActionError(err, "Couldn't unlock your starter items"); }
   }
+  try { state.plans = await loadPlans(userId); } catch { /* the page works without plans */ }
   render();
+  view.trackScroll();
+  view.restoreScroll();
 }
 
+NARROW.addEventListener?.("change", () => { if (Object.keys(state.data).length) render(); });
 load();

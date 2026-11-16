@@ -53,7 +53,7 @@ const n = (x) => x.toLocaleString("en-US");
 
 // /challenge works only in this channel when it's set (fly.toml in production,
 // .env locally); unset, it works anywhere.
-const challengeChannelId = () => process.env.CHALLENGE_CHANNEL_ID || null;
+export const challengeChannelId = () => process.env.CHALLENGE_CHANNEL_ID || null;
 
 export function refusal(reason, user) {
   return {
@@ -117,7 +117,7 @@ export function boardMenu(user, nonce) {
 }
 
 // `preview` is previewChallenge(user, key). The private preview shows the
-// exact loss; the public intro card never does (10× it is the balance).
+// exact loss; the public intro card says 10% (the result after the replay gives the amount).
 // The VS card's fallback when it can't render.
 export function previewEmbed(key, preview, { exactLoss = false } = {}) {
   const challenge = CHALLENGES[key];
@@ -192,7 +192,7 @@ export async function challengeExpMessage(outcome, names, user, { render = threa
 }
 
 // The event log line, and the Fight record for Battle Records (never throws).
-const logChallenge = (userId, outcome, extra, { playerName, trainerData }) => {
+export const logChallenge = (userId, outcome, extra, { playerName, trainerData }) => {
   logEvent("challenge", userId, { ...challengeLogEntry(outcome), ...extra });
   recordFight(() => challengeRecord(outcome, playerName, trainerData));
 };
@@ -203,16 +203,16 @@ const LATE_CLICKS_MS = 15 * 60 * 1000;
 // Nonces of the runs this process is playing. A run's step can stay put for
 // over CHALLENGE.staleRunMs while its replay waits in a long queue; only a run
 // whose command died (a restart finishes all of those) may be finished as stale.
-const playing = new Set();
+export const playing = new Set();
 
 // A run with no step for CHALLENGE.staleRunMs, and no command playing it,
 // stopped unexpectedly. Finishes it with no Revives and saves; the run's
 // message gets the result after the caller's reply, which has 3 seconds.
-async function finishStaleRun({ trainerData, userId, lockUser, enqueueSave, client, playerName }) {
+export async function finishStaleRun({ trainerData, userId, lockUser, enqueueSave, client, playerName }) {
   const done = await lockUser(userId, async () => {
     const run = trainerData[userId]?.challenge?.run;
     if (!isRunStale(trainerData[userId]) || playing.has(run.nonce)) return null;
-    const outcome = finishOpenRun({ trainerData, userId });
+    const outcome = await finishOpenRun({ trainerData, userId }); // a Promise under the full sim
     await enqueueSave(trainerData, { force: true });
     return { outcome, channelId: run.channelId, messageId: run.messageId };
   });
@@ -284,13 +284,19 @@ async function askRevive(latest, step) {
 // A replay that fails (a deleted message) stops only the replay. Resolves to
 // { outcome, posted, latest } (latest: the newest click, whose reply window
 // is freshest), or null if the run was finished elsewhere meanwhile.
-async function playRun({ channel, fightClick, step, trainerData, userId, lockUser, enqueueSave, playerName, trainer, aura }) {
+// `revive(latest, step)` asks for the pick (the private Discord menu by
+// default; the dashboard passes its own). With no `channel` nothing is posted
+// and, when given, `pace(shown, i)` waits as long as that fight's replay would
+// have taken, so the Revive window opens at the same point either way.
+export async function playRun({ channel, fightClick, step, trainerData, userId, lockUser, enqueueSave, playerName, trainer, aura, revive = askRevive, pace = null, onStep = null }) {
   let message = null;
-  let replaying = true;
-  let posted = true;
+  let replaying = !!channel;
+  let posted = !!channel;
   let latest = fightClick;
   for (;;) {
     const shown = step.ended ? step.outcome : step.view;
+    onStep?.(step);
+    if (!replaying && pace) await pace(shown, step.step);
     if (replaying) {
       const names = challengeNames(shown, playerName);
       const played = await playChallengeFight(channel, message, shown, step.step, names, { ...PLAYBACK, last: step.ended, trainer, aura })
@@ -299,7 +305,10 @@ async function playRun({ channel, fightClick, step, trainerData, userId, lockUse
           posted = false;
           return null;
         });
-      if (!played) replaying = false;
+      if (!played) {
+        replaying = false;
+        if (pace) await pace(shown, step.step);
+      }
       else if (!message && !step.ended) {
         message = played;
         // So a restart or a stale finish can put the result on this message.
@@ -313,13 +322,13 @@ async function playRun({ channel, fightClick, step, trainerData, userId, lockUse
     let slot;
     if (step.fainted.length) {
       if (replaying) await showChoosing(message, step.view, step.step);
-      const answer = await askRevive(latest, step);
+      const answer = await revive(latest, step);
       slot = answer.slot;
       latest = answer.click;
     }
     const prev = step;
     step = await lockUser(userId, async () => {
-      const next = continueRun({ trainerData, userId, nonce: prev.nonce, step: prev.step + 1, slot });
+      const next = await continueRun({ trainerData, userId, nonce: prev.nonce, step: prev.step + 1, slot }); // a Promise under the full sim
       if (next.ok) await enqueueSave(trainerData, { force: true });
       return next;
     });
@@ -418,6 +427,9 @@ async function openPreview(interaction, key, { trainerData, lockUser, enqueueSav
     await i.update({ content: "⚔️ Your challenge is starting below.", embeds: [], components: [], attachments: [] });
     const isRun = key === "elite4";
     const pick = i.customId.startsWith("challenge_fight_ranked") ? "ranked" : "casual";
+    // The full sim's worker can fail a fight (crash, out of memory). The runners leave nothing half done
+    // (utils/challenge/runChallenge.js), so the player only needs telling.
+    const fightFailed = (err) => { console.warn("⚠️ challenge fight failed:", err?.message || err); return null; };
     const first = await lockUser(userId, async () => {
       // Read the live record now: the dashboard or another command may have replaced it since the preview.
       const live = trainerData[userId];
@@ -425,13 +437,18 @@ async function openPreview(interaction, key, { trainerData, lockUser, enqueueSav
       // Built before the fight changes the record, so the intro shows the Badge still on the line.
       const card = live && cardView(key, atStake, live, playerName, pick);
       const seed = randomInt(0, 2 ** 31 - 1);
-      const out = isRun
+      // Awaited under the lock: a Promise from the sim worker under the full sim.
+      const out = await (isRun
         ? startRun({ trainerData, userId, seed, maxLoss: shown.loss, channelId: interaction.channelId, pick })
-        : runChallenge({ trainerData, userId, key, seed, maxLoss: shown.loss, pick });
+        : runChallenge({ trainerData, userId, key, seed, maxLoss: shown.loss, pick }));
       // Saved before the replay, so a failed or slow replay never changes the result.
       if (out.ok) await enqueueSave(trainerData, { force: true });
       return { ...out, atStake, card };
-    });
+    }).catch(fightFailed);
+    if (!first) {
+      collector.stop("fought");
+      return i.editReply({ content: "The fight couldn't run. Try again.", embeds: [], components: [] }).catch(() => {});
+    }
 
     collector.stop("fought");
     if (!first.ok) {
@@ -453,9 +470,14 @@ async function openPreview(interaction, key, { trainerData, lockUser, enqueueSav
     if (isRun) {
       // Played even when the intro card failed: the run is open and resolves through its Revives.
       playing.add(first.nonce);
+      let failed = false;
       const played = await playRun({
         channel: interaction.channel, fightClick: i, step: first, trainerData, userId, lockUser, enqueueSave, playerName, trainer, aura,
-      }).finally(() => playing.delete(first.nonce));
+      }).catch((err) => { failed = true; return fightFailed(err); }).finally(() => playing.delete(first.nonce));
+      if (failed) {
+        // The run stays open after the fights already played; the stale finish (finishStaleRun) plays out the rest.
+        return i.followUp({ content: `The next fight couldn't run, so your run is paused. Use /challenge again in ${CHALLENGE.staleRunMs / 60000} minutes and it finishes without Revives.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      }
       if (!played) return; // a stale finish closed it and shows the result
       outcome = played.outcome;
       posted &&= played.posted;

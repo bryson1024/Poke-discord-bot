@@ -20,7 +20,8 @@ const { createGameplayHandlers, BALL_COST, EVOLVE_STONE_COST, WEEKLY_PACK_TIERS 
 const { lockUser } = await import("../utils/userLocks.js");
 const { saveAndAck, SAVE_DELAYED_NOTE } = await import("../utils/saveManager.js");
 const { SHINY_CRAFT_COST_BY_TIER, shinyEvolveDustCost } = await import("../utils/economyRules.js");
-const { getTraining } = await import("../utils/training.js");
+const { getTraining, expForLevel } = await import("../utils/training.js");
+const { addCopy } = await import("../services/box.js");
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const copies = (u) => Object.values(u.pokemon || {}).reduce((n, e) => n + (e.normal || 0) + (e.shiny || 0), 0);
@@ -47,6 +48,49 @@ const auth = (who) => (id) => id === who;
 const player = (o = {}) => ({ cc: 0, tp: 0, pokemon: {}, items: { evolution_stone: 0 }, displayedPokemon: [], training: {}, ...o });
 const realRandom = Math.random;
 const withRandom = async (r, fn) => { Math.random = typeof r === "function" ? r : () => r; try { return await fn(); } finally { Math.random = realRandom; } };
+
+// ======================= Rare Candy =======================
+section("Rare Candy: use on any copy");
+{
+  const U = "100000000000000009";
+  const { state, h } = setup({ [U]: player({ items: { evolution_stone: 0, rare_candy: 5 } }) });
+  const u = state.td[U];
+  const pidgey = addCopy(u, 16, "normal", { exp: expForLevel(10) });
+  const use = (body) => h.useRareCandy({ body: { id: U, ...body }, isAuthorized: auth(U) });
+
+  assertEqual((await use({ uid: pidgey.uid, qty: 9 })).status, 400, "more than owned is refused");
+  assertEqual(u.items.rare_candy, 5, "nothing spent on a refusal");
+  const r = await use({ uid: pidgey.uid, qty: 3, requestId: "candy-req-0001" });
+  assertTrue(r.status === 200 && r.body.success && r.body.saved === true, "use succeeds and is saved");
+  assertEqual(r.body.candy.used, 3, "3 used");
+  assertEqual(u.items.rare_candy, 2, "3 taken from the bag");
+  assertEqual(r.body.rareCandyRemaining, 2, "remaining reported");
+  assertEqual(u.box[pidgey.uid].exp, expForLevel(10) + r.body.candy.gained, "EXP added to that copy");
+  const again = await use({ uid: pidgey.uid, qty: 3, requestId: "candy-req-0001" });
+  assertTrue(again.body.replayed === true && u.items.rare_candy === 2, "a repeated request isn't applied twice");
+  assertEqual(state.events.filter((e) => e.type === "rare_candy").length, 1, "logged once");
+  assertEqual((await use({ uid: "missing" })).status, 400, "unknown copy refused");
+  assertEqual((await h.useRareCandy({ body: { id: U, uid: pidgey.uid }, isAuthorized: auth("someone") })).status, 403, "needs the player's session");
+}
+
+section("Rare Candy: the Squirtle Squad Leader levels its own line");
+{
+  const { grantSpecial } = await import("../services/box.js");
+  const { chosenMoves } = await import("../services/movesets.js");
+  const { autoMoveset } = await import("../utils/battle/moveset.js");
+  const U = "100000000000000019";
+  const { state, h } = setup({ [U]: player({ items: { evolution_stone: 0, rare_candy: 3 } }) });
+  const u = state.td[U];
+  const plain = addCopy(u, 7, "normal", { exp: expForLevel(25) });
+  const { uid: leader } = grantSpecial(u, "squad-leader"); // starts at Lv 25
+  u.displayedPokemon = [{ id: 7, variant: "squad-leader", uid: leader }];
+  // Three candies take it from Lv 25 to 28, past Aqua Tail (learned at Lv 28).
+  const r = await h.useRareCandy({ body: { id: U, uid: leader, qty: 3 }, isAuthorized: auth(U) });
+  assertEqual([r.status, r.body.candy?.toLevel], [200, 28], "Rare Candy levels the Leader");
+  assertEqual(u.box[plain.uid].exp, expForLevel(25), "the plain Squirtle gains nothing");
+  assertEqual(chosenMoves(u, "display", 7, "squad-leader", { uid: leader }), autoMoveset(7, 25), "the Leader keeps the moves it had, without Aqua Tail");
+  assertEqual(chosenMoves(u, "display", 7, "normal"), null, "plain Squirtle's moves aren't touched");
+}
 
 // ======================= Capture =======================
 section("Capture: Poké Balls (instant use)");
@@ -286,6 +330,8 @@ section("Weekly pack");
   const u = state.td[U];
   assertTrue(r.status === 200 && r.body.success && r.body.saved === true && u.weeklyPackClaimed === true, "claim succeeds and is saved");
   assertEqual(r.body.rewards.map((x) => x.rarity), ["common", "common", "common", "uncommon", "uncommon", "rare"], "3 common, 2 uncommon, 1 rare");
+  assertEqual(r.body.rareCandy, 10, "a 10 Rare Candy bundle");
+  assertTrue((u.items?.rare_candy ?? 0) >= 10, "the candy is in the bag (plus any duplicate's)");
   assertEqual(copies(u), 6, "six Pokémon granted");
   const again = await wk();
   assertTrue(again.status === 400 && /already claimed/.test(again.body.error) && copies(u) === 6, "a second claim is refused");

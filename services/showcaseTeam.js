@@ -20,6 +20,8 @@ import { normalizeVariant } from "../utils/specialVariants.js";
 import { getMega, megaFormGate } from "../utils/megas.js";
 import { isMegaCapabilityEnabled } from "../config/features.js";
 import { toTeamObj } from "../utils/economyRules.js";
+import { fusionFieldOf } from "../utils/fusions.js";
+import { storedFusion, hasFormKey, fusionSelectionError } from "./fusionTeam.js";
 
 export const SHOWCASE_MAX = 6;
 const fail = (status, error, code) => ({ ok: false, status, error, code });
@@ -48,7 +50,8 @@ function cleanSlots(user, raw) {
     if (!uid) continue; // no copy left for this slot: it can't be shown
     used.add(uid);
     const mega = megaFieldOf(entry);
-    out.push({ ...slot, uid, ...(mega && megaFitsSlot(user, slot, mega) ? { mega } : {}) });
+    const form = storedFusion(user, slot, entry, "Showcase"); // a fusion form, while unlocked
+    out.push({ ...slot, uid, ...(mega && megaFitsSlot(user, slot, mega) ? { mega } : {}), ...(form ? { form } : {}) });
   }
   return out;
 }
@@ -103,7 +106,15 @@ export function prepareShowcaseSelection(user, rawTeam, { env = process.env } = 
       const gate = megaFormGate(mega, "team", { env });
       if (!gate.allowed) return { ...fail(400, `${f.name} isn't available for teams right now.`, "blocked"), reasons: gate.reasons };
     }
-    team.push({ ...slot, uid, ...(mega ? { mega } : {}) });
+    let form = null;
+    if (hasFormKey(entry)) {
+      form = fusionFieldOf(entry);
+      if (!form) return fail(400, "Invalid form.", "bad_form");
+    }
+    team.push({ ...slot, uid, ...(mega ? { mega } : {}), ...(form ? { form } : {}) });
   }
+  // Fusion forms: unlocked and switched on. No team rule: the Showcase never fights.
+  const fusionError = fusionSelectionError(user, team, { env, teamRule: false });
+  if (fusionError) return fusionError;
   return { ok: true, team };
 }

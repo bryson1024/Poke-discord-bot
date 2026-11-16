@@ -20,9 +20,9 @@
 
 import { getCatalogItem } from "../catalog/items.js";
 import { getQuantity, consumeItem } from "./inventory.js";
-import { canLearnByTm, moveIdForTmItem } from "../utils/battle/tmData.js";
+import { canLearnByTm, moveIdForTmItem, tmMoveAvailable } from "../utils/battle/tmData.js";
 import { getSpecies } from "../utils/battle/data.js";
-import { autoMoveset } from "../utils/battle/moveset.js";
+import { defaultMoves } from "./fullSimCutover.js";
 import { getTraining } from "../utils/training.js";
 import { isTmEnabled } from "../config/tmFeatures.js";
 import { learnableMoves, chosenMoves, setMoveset, moveInfo, MAX_MOVES, TEAM_TYPES } from "./movesets.js";
@@ -54,9 +54,9 @@ function slotOf(user, team, id, variant, uid) {
   return i < 0 ? null : i + 1;
 }
 
-/** The moves this copy battles with on `team` now (its selection, else automatic). */
+/** The moves this copy battles with on `team` now (its selection, else automatic; full sim: as recorded at cutover). */
 function effectiveMoves(user, team, id, variant, uid) {
-  return chosenMoves(user, team, id, variant, { uid }) ?? autoMoveset(id, (uid && copyTraining(user, uid)?.level) ?? getTraining(user, id, variant).level);
+  return chosenMoves(user, team, id, variant, { uid }) ?? defaultMoves(user, { id, variant, uid }, (uid && copyTraining(user, uid)?.level) ?? getTraining(user, id, variant).level);
 }
 
 /** Teams the target copy is on → { team: { slot, moves } }. */
@@ -93,7 +93,7 @@ export function teachOptions(user, { speciesId, variant }, { env = process.env }
   for (const itemId of Object.keys(user?.items ?? {})) {
     const move = moveIdForTmItem(itemId);
     const entry = move && getCatalogItem(itemId);
-    if (!entry || entry.status !== "active" || !(getQuantity(user, itemId) > 0)) continue;
+    if (!entry || entry.status !== "active" || !tmMoveAvailable(move, env) || !(getQuantity(user, itemId) > 0)) continue;
     const compatible = canLearnByTm(id, move);
     const status = {};
     const learnsAt = {}; // teachable copies that learn it by level-up later: key → Level
@@ -125,7 +125,7 @@ export function teachTm(user, req = {}, { env = process.env, now = Date.now(), r
   const move = moveIdForTmItem(req.item);
   const entry = move ? getCatalogItem(req.item) : null;
   if (!entry || entry.category !== "tm") return fail(400, "Unknown TM.", "unknown_tm");
-  if (entry.status !== "active") return fail(400, `${entry.name} can't be used yet.`, "not_usable");
+  if (entry.status !== "active" || !tmMoveAvailable(move, env)) return fail(400, `${entry.name} can't be used yet.`, "not_usable");
   if (getQuantity(user, entry.id) < 1) return fail(400, `You don't have ${entry.name}.`, "no_tm");
   if (!canLearnByTm(id, move)) return fail(400, `${getSpecies(id).name} can't learn ${moveInfo(move).name}.`, "incompatible");
 

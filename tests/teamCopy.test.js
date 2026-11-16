@@ -47,4 +47,59 @@ section("applyTeamCopy: moves follow the copied Pokémon");
   assertTrue(!("6:shiny" in (u.movesets.battle ?? {})), "key not on the team writes nothing");
 }
 
+section("applyTeamCopy: a slot's own copy gets the source copy's moves (2026-11-15)");
+{
+  const { addCopy } = await import("../services/box.js");
+  const { buildBattleTeam } = await import("../utils/battle/runBattle.js");
+  const { expForLevel } = await import("../utils/training.js");
+  const u = { pokemon: {} };
+  const uid = addCopy(u, 145, "normal", { exp: expForLevel(52) }).uid;
+  u.displayedPokemon = [{ id: 145, variant: "normal", uid }];
+  setMoveset(u, "display", 145, "normal", ["discharge", "pluck"], { uid });
+  setMoveset(u, "battle", 145, "normal", ["peck"]); // an old line pick on the target team
+  const saved = [{ id: 145, variant: "normal", uid }];
+  u.battleTeam = saved;
+  assertEqual(applyTeamCopy(u, { from: "display", to: "battle", keys: ["145:normal"] }, saved), ["145:normal"], "copied");
+  assertEqual(buildBattleTeam(u)[0].moves, ["discharge", "pluck"], "the ranked battle uses the copied moves");
+  assertEqual(u.movesets.battle["145:normal"], ["peck"], "the line pick is left alone");
+
+  // Automatic on the source → the same moves on the target, even with a line pick there.
+  setMoveset(u, "display", 145, "normal", null, { uid });
+  applyTeamCopy(u, { from: "display", to: "battle", keys: ["145:normal"] }, saved);
+  const { defaultMoves } = await import("../services/fullSimCutover.js");
+  assertEqual(buildBattleTeam(u)[0].moves, defaultMoves(u, { id: 145, variant: "normal", uid }, 52), "automatic source → its automatic moves, not the old line pick");
+}
+
+section("applyTeamCopy: Abilities and held items come along (2026-11-16)");
+{
+  const { addCopy } = await import("../services/box.js");
+  const { expForLevel } = await import("../utils/training.js");
+  const { chosenAbility, setAbility, regularAbilities } = await import("../services/abilities.js");
+  const { reconcileTeamEquipment, teamEquipment } = await import("../services/heldItems.js");
+  const u = { pokemon: {}, items: { leftovers: 1, focus_sash: 1, quick_claw: 1 } };
+  const a = addCopy(u, 6, "normal", { exp: expForLevel(50) }).uid;   // Charizard
+  const b = addCopy(u, 130, "normal", { exp: expForLevel(50) }).uid; // Gyarados
+  const c = addCopy(u, 94, "normal", { exp: expForLevel(50) }).uid;  // Gengar, added by hand
+  const [abil6] = regularAbilities(6);
+  const abil130 = regularAbilities(130)[0];
+  u.displayedPokemon = [{ id: 6, variant: "normal", uid: a }, { id: 130, variant: "normal", uid: b }];
+  setAbility(u, "display", 6, "normal", abil6, { uid: a });
+  setAbility(u, "battle", 130, "normal", abil130, { uid: b }); // automatic on display → cleared here
+  u.equipment = { rev: 3, teams: {
+    display: { [`u:${a}`]: "leftovers" },
+    battle: { [`u:${b}`]: "focus_sash", [`u:${c}`]: "leftovers" },
+  } };
+  const saved = [{ id: 6, variant: "normal", uid: a }, { id: 130, variant: "normal", uid: b }, { id: 94, variant: "normal", uid: c }];
+  u.battleTeam = saved;
+  applyTeamCopy(u, { from: "display", to: "battle", keys: ["6:normal", "130:normal"] }, saved);
+  assertEqual(chosenAbility(u, "battle", 6, "normal", { uid: a }), abil6, "chosen Ability copied");
+  assertEqual(chosenAbility(u, "battle", 130, "normal", { uid: b }), null, "Automatic on the source → Automatic here");
+  assertEqual(teamEquipment(u, "battle")[`u:${a}`], "leftovers", "held item copied");
+  assertTrue(!(`u:${b}` in teamEquipment(u, "battle")), "no item on the source → none here");
+  assertTrue(!(`u:${c}` in teamEquipment(u, "battle")), "Item Clause: the copied Leftovers wins over the hand-added holder");
+  assertTrue(u.equipment.rev > 3, "equipment rev bumped");
+  assertEqual(reconcileTeamEquipment(u, "battle"), [], "copied items pass the team rules");
+  assertEqual(teamEquipment(u, "display"), { [`u:${a}`]: "leftovers" }, "source items untouched");
+}
+
 finish();

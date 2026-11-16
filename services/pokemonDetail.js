@@ -10,25 +10,36 @@
 import { getSpeciesEntry, isGenerationLive } from "../utils/speciesCatalog.js";
 import { getSpecies, getMove, TYPE_ID_TO_NAME } from "../utils/battle/data.js";
 import { computeStats } from "../utils/battle/stats.js";
-import { autoMoveset, movesLearned } from "../utils/battle/moveset.js";
+import { movesLearned } from "../utils/battle/moveset.js";
+import { defaultMoves } from "./fullSimCutover.js";
 import { getTraining } from "../utils/training.js";
 import { slotView } from "../utils/render/teamView.js";
 import { displaySpeciesName } from "../utils/render/names.js";
 import { RANKED } from "../utils/battle/tuning.js";
-import { megasOfSpecies } from "../utils/megas.js";
+import { megasOfSpecies, megaBattleEligibility } from "../utils/megas.js";
 import { unlockedForms, megaLineKey } from "./megaUnlocks.js";
 import { isMegaCapabilityEnabled } from "../config/features.js";
 import { toTeamObj } from "../utils/economyRules.js";
-import { learnableMoves, chosenMoves, moveInfo as movesetMoveInfo } from "./movesets.js";
+import { learnableMoves, chosenMoves, formMoves, moveInfo as movesetMoveInfo } from "./movesets.js";
+import { fusionsOfSpecies } from "../utils/fusions.js";
+
+// Fusion forms: each unlocked form's own moves at this Level, for the
+// Teams moves editor (shown while the slot uses that form). {} for other species.
+const formLearnableAt = (user, id, variant, level) => Object.fromEntries(fusionsOfSpecies(id)
+  .map((f) => [f.id, formMoves(user, id, variant, f.id, level).map((m) => ({ ...movesetMoveInfo(m.id), learnedAt: m.learnedAt, source: "form", form: f.id, formName: f.name }))])
+  .filter(([, list]) => list.length));
 import { customCopiesOf, plainCount } from "./ownership.js";
 import { isTmEnabled } from "../config/tmFeatures.js";
 import { copiesOf, ownedCount } from "./box.js";
 import { VARIANT_KEYS, isSpecialVariant, specialBattleProfile } from "../utils/specialVariants.js";
 import { pokemonSpritePath } from "../utils/sprites.js";
+import { abilityView, abilityInfo } from "./abilities.js";
+import { availableTmMovesForSpecies } from "../utils/battle/tmData.js";
 
 const sum = (s) => (s ? s.hp + s.atk + s.def + s.spa + s.spd + s.spe : null);
 const nameOf = (id) => displaySpeciesName(id, getSpeciesEntry(id)?.name);
-const moveInfo = (m) => { const x = getMove(m); return x ? { id: m, name: x.name, type: x.type ?? null, power: x.power ?? null, category: x.category ?? null } : { id: m, name: String(m), type: null, power: null, category: null }; };
+// The same move info as services/movesets.js (desc, acc and priority included).
+const moveInfo = movesetMoveInfo;
 
 /** Where this copy sits on each team: { display: 2, battle: null } (1-based slots). */
 function teamSlots(user, id, variant) {
@@ -66,6 +77,28 @@ function trainedCopies(user, id, variant, level) {
     teams: copySlots(user, c.uid),
     history: (c.history ?? []).slice(-20),
   }));
+}
+
+/**
+ * Every move the species can learn, for the Pokédex: level-up moves (the
+ * earliest Level each is learned at, Level order) and, while TMs are on,
+ * the TMs it can be taught ("launch" moves, the ones Teach a TM offers).
+ * Same move data as the battle (utils/battle/data.js).
+ */
+export function speciesLearnset(id, { env = process.env } = {}) {
+  const species = getSpecies(id);
+  if (!species) return { levelUp: [], tm: [] };
+  const seen = new Set();
+  const levelUp = [];
+  for (const [at, moveId] of species.levelMoves ?? []) {
+    if (seen.has(moveId) || !getMove(moveId)) continue;
+    seen.add(moveId);
+    levelUp.push({ ...moveInfo(moveId), learnedAt: at });
+  }
+  const tm = isTmEnabled(env)
+    ? availableTmMovesForSpecies(id, env).filter((m) => getMove(m)).map(moveInfo).sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+  return { levelUp, tm };
 }
 
 /**
@@ -107,13 +140,18 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
       power: v.statTotal,
       stats50,
       power50: sum(stats50),
-      moves: species ? autoMoveset(id, level).map(moveInfo) : [], // the automatic moveset (slotView uses the same function)
+      moves: species ? defaultMoves(user, { id, variant }, level).map(moveInfo) : [], // the moves it fights with when none are picked (slotView agrees)
       // Chosen movesets per team (null = automatic) and every move it may equip.
       movesets: {
         display: chosenMoves(user, "display", id, variant)?.map(movesetMoveInfo) ?? null,
         battle: chosenMoves(user, "battle", id, variant)?.map(movesetMoveInfo) ?? null,
       },
       learnable: species ? learnableMoves(user, id, variant, { level }).map((m) => ({ ...movesetMoveInfo(m.id), learnedAt: m.learnedAt, source: m.source })) : [],
+      formLearnable: formLearnableAt(user, id, variant, level),
+      // Fusion forms: each form's fixed ability (Teravolt, Turboblaze, Prism Armor), shown while the slot uses it.
+      formAbility: Object.fromEntries(fusionsOfSpecies(id).map((f) => [f.id, { ...abilityInfo(f.ability), formName: f.name }])),
+      // Full sim: its regular abilities and, per team, the choice (null = Automatic) and Automatic's pick.
+      ability: abilityView(user, id, variant, { env }),
       nextMoves: species ? movesLearned(id, level, Math.min(100, level + 20)).map(moveInfo) : [],
       teams: teamSlots(user, id, variant),
       // TM system (T1): untrained copies vs. customized copies of this line.
@@ -122,18 +160,29 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
       trained: species ? trainedCopies(user, id, variant, level) : [],
       // Every copy is its own Pokémon (docs/adr/0001): its Level, the moves
       // it may equip there, and its own moveset on each team.
-      each: species ? copiesOf(user, id, variant).map((c) => ({
+      // A copy's details drawer (Teams slot, Collection box tile) shows these:
+      // what that copy fights with on each team (movesets ?? moves).
+      each: species ? copiesOf(user, id, variant).map((c) => {
+        const cv = slotView(user, { speciesId: id, variant, level: c.level, copyUid: c.uid }, 0);
+        return {
         uid: c.uid,
         level: c.level,
         trained: c.trained,
-        moves: autoMoveset(id, c.level).map(moveInfo),
+        expFrac: cv.expFrac,
+        stats: cv.stats,
+        power: cv.statTotal,
+        teams: copySlots(user, c.uid),
+        moves: defaultMoves(user, { id, variant, uid: c.uid }, c.level).map(moveInfo),
         nextMoves: movesLearned(id, c.level, Math.min(100, c.level + 20)).map(moveInfo),
         learnable: learnableMoves(user, id, variant, { uid: c.uid }).map((m) => ({ ...movesetMoveInfo(m.id), learnedAt: m.learnedAt, source: m.source })),
+        formLearnable: formLearnableAt(user, id, variant, c.level),
         movesets: {
           display: chosenMoves(user, "display", id, variant, { uid: c.uid })?.map(movesetMoveInfo) ?? null,
           battle: chosenMoves(user, "battle", id, variant, { uid: c.uid })?.map(movesetMoveInfo) ?? null,
         },
-      })) : [],
+        ability: abilityView(user, id, variant, { uid: c.uid, env }),
+        };
+      }) : [],
     };
   }
 
@@ -144,6 +193,9 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
       id: f.id,
       name: f.name,
       unlocked: { normal: unlockedForms(user, megaLineKey(id, "normal")).includes(f.id), shiny: unlockedForms(user, megaLineKey(id, "shiny")).includes(f.id) },
+      // Ranked Power with this form in the slot: its Mega stats once it can
+      // battle; until then it fights as the base form (withMegaStats).
+      power50: megaBattleEligibility(f.id, { env }).battleReady ? sum(computeStats(f.baseStats, RANKED.level)) : null,
     }))
     : [];
 
@@ -164,6 +216,8 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
       owned: counts,
       copies,
       megaForms,
+      // Pokédex: every move it can learn (level-up with Levels, TMs).
+      learnset: speciesLearnset(id, { env }),
       // TM system (T4): whether "Teach a TM" is offered (TM_ENABLED).
       tm: { enabled: isTmEnabled(env) },
     },

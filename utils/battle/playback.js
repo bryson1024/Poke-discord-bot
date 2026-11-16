@@ -19,10 +19,12 @@
 import { AttachmentBuilder, EmbedBuilder } from "discord.js";
 import { GifReader } from "omggif";
 import { pickFrameTurns } from "./render.js";
-import { PLAYBACK, CUTE } from "./tuning.js";
+import { activeAt, turnTimeline, marksAt, battleFx } from "./timeline.js";
+import { PLAYBACK, CUTE, FULL_SIM } from "./tuning.js";
 import { teamCuteness } from "./cuteness.js";
 import { trainingKey } from "../training.js";
 import { CHALLENGES, opponentName, displaySprite } from "../challenge/roster.js";
+import { mythicLine } from "../../catalog/challengeLines.js";
 import { threaded } from "../render/renderers.js";
 import { trainerTier, cardTrainerFx } from "../render/trainerTier.js";
 import { battleVsAltText } from "../render/battleVsCard.js";
@@ -114,6 +116,17 @@ export function buildResultEmbed(outcome, names) {
 }
 
 /** The attachment name for one playback update: "start", a turn number, or "final". */
+/**
+ * Roughly how long a fight's replay runs in a channel: the opening hold, one
+ * update per shown turn (at most maxUpdates), then the result image, each
+ * delayMs apart. Rendering time is not counted. Used when there is no channel,
+ * so a dashboard Elite Four run opens its Revive window at about the same point.
+ */
+export function replayEstimateMs(fight, { maxUpdates, delayMs } = PLAYBACK) {
+  const turns = Number(fight?.result?.turns) || 0;
+  return VS_HOLD_MS + (Math.min(turns, maxUpdates) + 1) * delayMs;
+}
+
 export const battleImageName = (step) => (typeof step === "number" ? `battle-t${step}.gif` : `battle-${step}.gif`);
 
 function header(outcome) {
@@ -129,6 +142,12 @@ function header(outcome) {
   if (teamCuteness(outcome.sides[outcome.surge.side].members) > CUTE.threshold) return `${intro}\n💖 The crowd can't resist ${underdog}'s team! Underdog surge!`;
   return `${intro}\n🔥 The crowd is behind ${underdog}! Underdog surge!`;
 }
+
+/** How many updates a replay gets: more for a full-sim (v2) result. */
+export const updatesFor = (result) => (result?.v === 2 ? FULL_SIM.maxUpdates : PLAYBACK.maxUpdates);
+
+// Who is in front as a turn starts (moved to the timeline, which tracks it through the turn).
+export { activeAt };
 
 // First come, first served: at most `limit` holders at once. acquire()
 // resolves to a release function; while waiting, onPlace(n) hears the
@@ -177,9 +196,15 @@ const replays = createQueue(PLAYBACK.maxAtOnce);
 // opponent): their rows get the tier backdrop. `vs` (/battle only) is the
 // VS card's view: it opens the replay in place of the start image, held for
 // vsHoldMs; if it can't render, the start image goes as before.
-async function replayFight({ channel, message, heading, fight, names, sprites, maxUpdates, delayMs, finalEmbed, paceStart = false, trainers = [null, null], tiers = [null, null], theme = null, award = null, namePrefix = "", vs = null }) {
+// Battle FX (full sim): each turn image plays its timeline, and the next
+// update waits for that image's beats (its waitMs, scaled by delayMs).
+// `render` draws each image (the render threads; tests stub it).
+async function replayFight({ channel, message, heading, fight, names, sprites, maxUpdates, delayMs, finalEmbed, paceStart = false, trainers = [null, null], tiers = [null, null], theme = null, award = null, namePrefix = "", vs = null, render = threaded.battleFrame }) {
   const sides = fight.sides.map((s) => ({ name: names[s.userId], members: s.members }));
   const { snapshots, log, turns: total } = fight.result;
+  const fx = battleFx() && Boolean(fight.result.steps); // full sim, BATTLE_FX on
+  const memberNames = sides.map((s) => s.members.map((m) => m.name ?? `#${m.speciesId}`));
+  const marks = (i) => (fx ? { marks: marksAt(fight.result, i) } : {});
   // Each update gets its own file name (battleImageName). With one shared
   // "battle.gif", a desktop client whose first load failed kept showing the
   // broken image for every later edit, result included.
@@ -187,7 +212,7 @@ async function replayFight({ channel, message, heading, fight, names, sprites, m
   // goes up, so each image's sprites carry on where the last left off.
   let clockMs = 0;
   const image = async (step, opts) => new AttachmentBuilder(
-    await threaded.battleFrame({ sides, surgeSide: fight.surge?.side ?? null, sprites, trainers, tiers, theme, clockMs, ...opts }),
+    await render({ sides, surgeSide: fight.surge?.side ?? null, sprites, trainers, tiers, theme, clockMs, ...(fx && { chipRoom: true }), ...opts }),
     { name: namePrefix + battleImageName(step) },
   );
   // Renders the next image during the wait, so rendering doesn't stretch the pace.
@@ -212,7 +237,7 @@ async function replayFight({ channel, message, heading, fight, names, sprites, m
 
   // In an Elite Four run, a Pokémon that fainted in an earlier fight can't lead off.
   const leads = sides.map((s, i) => s.members[snapshots[0][i].findIndex((hp) => hp > 0)]?.name).join(" and ");
-  const startImage = () => image("start", { hpBefore: snapshots[0], screens: [["The battle begins!", `${leads} lead off.`]] });
+  const startImage = () => image("start", { hpBefore: snapshots[0], screens: [["The battle begins!", `${leads} lead off.`]], ...marks(0) });
   const opening = await vsCard();
   const start = { content: heading, files: [opening ? opening.file : paceStart ? await paced(startImage) : await startImage()] };
   if (message) await message.edit(start);
@@ -222,10 +247,15 @@ async function replayFight({ channel, message, heading, fight, names, sprites, m
   try {
     let shown = 0;
     // A fight lost before anyone moves (0 turns) goes straight to the result.
-    for (const turn of total ? pickFrameTurns(total, maxUpdates) : []) {
+    const updates = fight.result.v === 2 ? Math.max(maxUpdates, FULL_SIM.maxUpdates) : maxUpdates;
+    for (const turn of total ? pickFrameTurns(total, updates) : []) {
       const badge = turn - shown > 1 ? `TURNS ${shown + 1}–${turn}` : `TURN ${turn}`;
-      const file = await paced(() => image(turn, { hpBefore: snapshots[turn - 1], events: log[turn - 1], badge }), wait);
-      wait = delayMs;
+      const timeline = fx ? turnTimeline(fight.result, turn, memberNames) : null;
+      const active = fight.result.steps ? { active: activeAt(fight.result, turn) } : {}; // today's results: first with HP left
+      const plays = timeline ? { timeline } : { events: log[turn - 1], ...active };
+      const file = await paced(() => image(turn, { hpBefore: snapshots[turn - 1], badge, ...plays }), wait);
+      // The next update waits for this image's beats (never less than today).
+      wait = timeline ? Math.round((timeline.waitMs * delayMs) / PLAYBACK.delayMs) : delayMs;
       await message.edit({ files: [file] });
       shown = turn;
     }
@@ -241,7 +271,7 @@ async function replayFight({ channel, message, heading, fight, names, sprites, m
     const screens = resultScreens(fight, names);
     if (award) screens.splice(1, 0, award.lines);
     const file = await paced(() => image("final", {
-      sides: grownSides, hpBefore: snapshots[total], badge: "FINAL", winnerSide: winnerSideOf(fight), screens,
+      sides: grownSides, hpBefore: snapshots[total], badge: "FINAL", winnerSide: winnerSideOf(fight), screens, ...marks(total),
       ...(award && { theme: { ...theme, award: { screen: 1, badgeFile: award.badgeFile, title: award.title } } }),
     }), wait);
     await message.edit({ files: [file], ...(finalEmbed && { embeds: [finalEmbed] }) });
@@ -276,11 +306,11 @@ async function waitForSlot(channel, queue, heading, message = null) {
 // `trainers` are the two sides' displayed trainer files (null: none); both
 // are players, so each has its tier. `vs` is the VS card's view (see
 // replayFight), built with the records from before the battle.
-export async function playBattle(channel, outcome, names, { maxUpdates, delayMs, queue = replays, trainers = [null, null], auras = null, vs = null } = PLAYBACK) {
+export async function playBattle(channel, outcome, names, { maxUpdates, delayMs, queue = replays, trainers = [null, null], auras = null, vs = null, render = threaded.battleFrame } = PLAYBACK) {
   const { message, release } = await waitForSlot(channel, queue, header(outcome));
   try {
     await replayFight({
-      channel, message, heading: header(outcome), fight: outcome, names, sprites: new Map(), maxUpdates, delayMs, trainers, vs,
+      channel, message, heading: header(outcome), fight: outcome, names, sprites: new Map(), maxUpdates, delayMs, trainers, vs, render,
       tiers: auras ?? trainers.map((f) => trainerTier(f)), // each player's equipped Aura (services/auras.js auraLook)
       finalEmbed: buildResultEmbed(outcome, names),
     });
@@ -302,8 +332,14 @@ export function challengeNames(outcome, playerName) {
   return names;
 }
 
-// In a run, fight i > 0 also says what the break before it revived.
+// In a run, fight i > 0 also says what the break before it revived. Last
+// comes what the opponent says about a mythic on the Team, if anything.
 export function challengeHeader(outcome, i) {
+  const fight = outcome.fights[i];
+  return [challengeHeading(outcome, i), mythicLine(fight.opponentKey, fight.mythics)].filter(Boolean).join("\n");
+}
+
+function challengeHeading(outcome, i) {
   const player = `<@${outcome.userId}>`;
   const fight = outcome.fights[i];
   const opponent = opponentOf(outcome, fight.opponentKey);
@@ -346,8 +382,8 @@ export function buildChallengeEmbed(outcome, names) {
     outcome.prize && `🎁 ${prizeText(outcome.key, outcome.prize)}`,
     outcome.unlocked === "elite4" && "🔓 The Elite Four is open!",
     outcome.unlocked === "blue" && "🔓 Blue is waiting.",
-    // Never the amount: 10× a public loss would reveal the player's balance.
-    !outcome.cleared && "💸 Lost 10% of their CC.",
+    // The exact amount: a balance isn't private (the public trainer card shows it). Nothing to say when it cost nothing.
+    !outcome.cleared && outcome.ccLost > 0 && `💸 Lost ${outcome.ccLost.toLocaleString("en-US")} CC.`,
   ].filter(Boolean);
   // No Badge thumbnail: the result frame's award screen presents it.
   return lines.length ? new EmbedBuilder().setColor(0xf1c40f).setDescription(lines.join("\n")) : null;

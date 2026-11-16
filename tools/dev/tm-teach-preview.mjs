@@ -20,6 +20,7 @@ import { pathToFileURL } from "url";
 const [rootArg, portArg = "5192"] = process.argv.slice(2);
 const ROOT = path.resolve(rootArg);
 process.env.TM_ENABLED = "1";
+if (process.argv.includes("--full-sim")) process.env.FULL_SIM_ENABLED = "1"; // full-sim TMs (status moves etc.)
 const imp = (rel) => import(pathToFileURL(path.join(ROOT, rel)).href);
 const { pokemonDetail } = await imp("services/pokemonDetail.js");
 const { teachOptions, teachTm } = await imp("services/tmTeaching.js");
@@ -49,7 +50,7 @@ const trainerData = {
     },
     displayedPokemon: [{ id: 6, variant: "normal", uid: "c_Bt5Charzrd" }, { id: 25, variant: "normal" }],
     battleTeam: [{ id: 25, variant: "normal" }],
-    items: { evolution_stone: 20, shiny_dust: 200, tm_thunderpunch: 2, tm_flamethrower: 1, tm_surf: 1, tm_thunderbolt: 1 },
+    items: { evolution_stone: 20, shiny_dust: 200, tm_thunderpunch: 2, tm_flamethrower: 1, tm_surf: 1, tm_thunderbolt: 1, tm_toxic: 1, tm_swordsdance: 1 },
   },
 };
 const user = () => trainerData[ID];

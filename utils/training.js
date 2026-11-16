@@ -9,8 +9,9 @@
 import fs from "fs";
 import { addCopy, variantOf } from "../services/box.js";
 import { isSpecialVariant } from "./specialVariants.js";
+import { grantItem } from "../services/inventory.js";
 import {
-  LEVEL_CAP, CATCH_RANGES, CATCH_SKEW, CATCH_TAIL_CHANCE, DUPLICATE_LEVEL_SHARE,
+  LEVEL_CAP, CATCH_RANGES, CATCH_SKEW, CATCH_TAIL_CHANCE,
 } from "./battle/tuning.js";
 
 const pokemonData = JSON.parse(fs.readFileSync(new URL("../pokemonData.json", import.meta.url), "utf8"));
@@ -73,11 +74,13 @@ export function addExp(user, id, variant, amount) {
 
 // Every catch goes through here: a new copy (services/box.js) with its own
 // Catch level roll. isNew = the species entered the Pokédex just now;
-// isNewShiny = the first shiny of it ever. Duplicates no longer add EXP;
-// players Feed them instead.
+// isNewShiny = the first shiny of it ever. A duplicate (neither) also gives
+// one Rare Candy (rareCandy: 1), which the player can use on any Pokémon.
 export function grantCatch(user, speciesId, variant, rand = Math.random) {
   const made = addCopy(user, Number(speciesId), variant, { rand });
-  return { level: made.level, isNew: made.newSpecies, isNewShiny: made.newShiny, expGained: 0, uid: made.uid };
+  const duplicate = !made.newSpecies && !made.newShiny;
+  const rareCandy = duplicate && grantItem(user, "rare_candy", 1).ok ? 1 : 0;
+  return { level: made.level, isNew: made.newSpecies, isNewShiny: made.newShiny, expGained: 0, rareCandy, uid: made.uid };
 }
 
 // Evolution and shiny craft: the target keeps the higher of its own Level

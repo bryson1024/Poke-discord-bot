@@ -198,6 +198,10 @@ section("Defence");
 {
   const ag = megaMon("mega-aggron"), f = mon(6); covers("Filter");
   assertEqual(use(field(draws(NO_CRIT, ROLL)), move("Fighting", "Physical", 80), f, ag).damage, ref({ power: 80, a: f.atk, d: ag.def, eff: 2, final: 0.75 }), "Filter: super-effective damage 0.75×");
+  // Dusk Mane / Dawn Wings Necrozma: Prism Armor is Filter that Mold Breaker can't bypass.
+  const pa = mon(800, { ability: "Prism Armor", types: ["Psychic", "Steel"] }), fi = mon(6); covers("Prism Armor");
+  assertEqual(use(field(draws(NO_CRIT, ROLL)), move("Fire", "Special", 80), fi, pa).damage, ref({ power: 80, a: fi.spa, d: pa.spd, stab: 1.5, eff: 2, final: 0.75 }), "Prism Armor: super-effective damage 0.75×");
+  assertEqual(use(field(draws(NO_CRIT, ROLL)), move("Fire", "Special", 80), mon(6, { ability: "Mold Breaker" }), pa).damage, ref({ power: 80, a: fi.spa, d: pa.spd, stab: 1.5, eff: 2, final: 0.75 }), "…and Mold Breaker doesn't bypass it");
   assertEqual(use(field(draws(NO_CRIT, ROLL)), move("Normal", "Physical", 80), f, ag).damage, ref({ power: 80, a: f.atk, d: ag.def, eff: 0.5 }), "…other damage unchanged");
 }
 {
@@ -219,6 +223,11 @@ section("Defence");
   assertTrue(r2.damage > 0, "Mold Breaker ignores Levitate");
   const ve = megaMon("mega-venusaur"), m2 = megaMon("mega-ampharos");
   assertEqual(use(field(draws(NO_CRIT, ROLL)), move("Fire", "Special", 90), m2, ve).damage, ref({ power: 90, a: m2.spa, d: ve.spd, eff: 2 }), "Mold Breaker ignores Thick Fat");
+  // Black/White Kyurem (utils/fusions.js): Teravolt and Turboblaze are Mold Breaker.
+  for (const ab of ["Teravolt", "Turboblaze"]) {
+    covers(ab);
+    assertTrue(use(field(draws(NO_CRIT, ROLL)), move("Ground", "Physical", 100), mon(646, { ability: ab }), la).damage > 0, `${ab} ignores Levitate (Mold Breaker)`);
+  }
 }
 {
   const ch = mon(652, { ability: "Bulletproof" }), a = mon(143); covers("Bulletproof");
@@ -474,7 +483,7 @@ assertTrue(flags.crunch?.bite && flags.firepunch?.punch && flags.aurasphere?.pul
 section("Coverage: every implemented ability exercised");
 const implemented = Object.entries(ABILITY_REGISTRY).filter(([, a]) => a.status === "implemented").map(([n]) => n).sort();
 assertEqual(implemented.filter((n) => !covered.has(n)), [], `all ${implemented.length} implemented abilities are covered by this file`);
-assertEqual(implemented.length, 57, "57 implemented (56 Mega abilities + Wonder Guard)");
+assertEqual(implemented.length, 60, "60 implemented (56 Mega abilities + Wonder Guard + Teravolt/Turboblaze/Prism Armor for fusion forms)");
 void computeStats; void phys; void getMove;
 
 finish();

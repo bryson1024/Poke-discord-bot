@@ -58,6 +58,7 @@ section("/daily with the Evolution Stone roll (rand < 0.25)");
   await runDaily(td, id, 0.01);
   assertEqual([user.cc, user.tp], [1050, 110], "+1000 CC and +100 TP (unchanged amounts)");
   assertEqual(user.items.evolution_stone, 3, "exactly one Evolution Stone added");
+  assertTrue(user.items.rare_candy >= 2, "2 Rare Candy every day (plus any duplicate's)");
   assertEqual([user.items.shiny_dust, user.items.old_badge], [7, 1], "other items (including legacy ids) untouched");
   assertEqual(ownedCopies(user), copies + 2, "two Pokémon granted");
   assertEqual(user.customField, { keep: true }, "unrelated fields preserved");
@@ -72,7 +73,10 @@ section("/daily without the stone (rand ≥ 0.25)");
   const id = "4002";
   const td = { [id]: createNewUser(id, "Misty") };
   await runDaily(td, id, 0.99);
-  assertEqual(td[id].items, { evolution_stone: 0 }, "no stone, bag otherwise unchanged");
+  // A fixed roll catches the same Pokémon twice: the duplicate gives a Rare Candy.
+  const { rare_candy: candy = 0, ...rest } = td[id].items;
+  assertEqual(rest, { evolution_stone: 0 }, "no stone, bag otherwise unchanged");
+  assertTrue(candy >= 2 && candy <= 3, "2 Rare Candy even without the stone (plus a duplicate's)");
   assertEqual(td[id].cc, 1000, "CC still awarded");
 }
 

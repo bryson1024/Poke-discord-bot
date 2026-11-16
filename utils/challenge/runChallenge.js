@@ -13,10 +13,16 @@ import { CHALLENGES, enabledSprites } from "./roster.js";
 import { GYM_BADGES, earnedBadgeKeys } from "../../public/picker-pokemon/badges.js";
 import { buildTeam, teamForPick, availablePicks, applyGains, withoutMegaStats, withMegaStats } from "../battle/runBattle.js";
 import { simulateBattle } from "../battle/sim.js";
+import { simulateLive, after, undoOnFailure } from "../battle/simPool.js";
+import { isFullSimEnabled } from "../../config/fullSim.js";
+import { getPlan, planMoves } from "../../services/battlePlans.js";
+import { opponentPlan } from "../../catalog/opponentPlans.js";
 import { teamPower } from "../battle/power.js";
 import { teamExp, utcDay } from "../battle/rewards.js";
-import { CHALLENGE } from "../battle/tuning.js";
+import { CHALLENGE, FULL_SIM } from "../battle/tuning.js";
 import { speciesName } from "../training.js";
+import { isMythicTier } from "../../services/battleTeam.js";
+import { createRng } from "../battle/rng.js";
 import { TRAINER_COSTS } from "../trainerCosts.js";
 import { trackProgress } from "../../progression/achievements.js";
 import { ownsTrainer, grantTrainer } from "../../services/assets.js";
@@ -84,53 +90,99 @@ export function previewChallenge(user, key) {
   return { firstWin, prize: firstWin ? prizeFor(user, key) : null, loss: challengeLoss(user.cc) };
 }
 
-// Opponents fight with CHALLENGE.statBoost on their stats, at the roster's Levels.
-const opponentMembers = (o) =>
-  o.team.map((m) => ({ speciesId: m.speciesId, variant: "normal", name: speciesName(m.speciesId), level: m.level, statMult: CHALLENGE.statBoost }));
+// Opponents fight with CHALLENGE.statBoost on their stats (on the full sim,
+// FULL_SIM.challengeStatBoost: they're Experts there), at the roster's Levels.
+// Full sim: their signature plan (catalog/opponentPlans.js) also picks their moves.
+const opponentMembers = (o, engine, mythics) =>
+  o.team.map((m) => ({
+    speciesId: m.speciesId, variant: "normal", name: speciesName(m.speciesId), level: m.level,
+    statMult: engine === "full" ? fullSimBoost(o.key, mythics?.count ?? 0) : CHALLENGE.statBoost,
+    ...(engine === "full" && { moves: planMoves(m.speciesId, m.level, opponentPlan(o.key).plan, FULL) }),
+  }));
+const FULL = { FULL_SIM_ENABLED: "1" };
+
+// On the full sim the Elite Four, Blue and Red notice mythics on the
+// player's whole Team (decided 2026-11-14): each one, up to
+// FULL_SIM.mythicCap, moves their boost a step toward FULL_SIM.mythicStatBoost,
+// so mythics still help, just less. The line they say is
+// catalog/challengeLines.js.
+function fullSimBoost(key, count) {
+  const base = FULL_SIM.challengeStatBoost[key] ?? CHALLENGE.statBoost;
+  const top = FULL_SIM.mythicStatBoost[key];
+  return top == null || !count ? base : base + ((top - base) * Math.min(count, FULL_SIM.mythicCap)) / FULL_SIM.mythicCap;
+}
+
+/**
+ * { count, speciesId } when this opponent notices mythics on `team`, else
+ * null. The one they name is drawn from the fight's seed, so each fight
+ * picks its own and a replay (or a Fight record's re-run) names the same one.
+ */
+function noticedMythics(team, opponent, engine, fightSeed) {
+  if (engine !== "full" || FULL_SIM.mythicStatBoost[opponent.key] == null) return null;
+  const mythics = team.filter((m) => isMythicTier(m.speciesId));
+  return mythics.length ? { count: mythics.length, speciesId: mythics[createRng(fightSeed).int(mythics.length)].speciesId } : null;
+}
 
 // One fight: opponent `i` against the player's `members`, who carry their HP
 // from earlier fights. EXP is per `team` slot. Challenges have no Underdog
 // surge (spec: Difficulty): a surge lifted a lone Pokémon to Lv 100 and beat Gyms.
-function simulateFight({ team, members, opponent, i, seed }) {
-  const foes = opponentMembers(opponent);
+// `simulate` runs the fight: simulateBattle (synchronous) by default, or a
+// runner's simulateLive, which is a Promise under the full sim.
+function simulateFight({ team, members, opponent, i, seed, plan, engine, simulate = simulateBattle }) {
+  const fightSeed = seed + 2 * i + 1;
+  const mythics = noticedMythics(team, opponent, engine, fightSeed);
+  const foes = opponentMembers(opponent, engine, mythics);
   const alive = members.filter((m) => m.hpFraction === undefined || m.hpFraction > 0);
   const powers = [teamPower(alive), teamPower(foes)];
   const surge = null; // kept in the fight so playback reads the same shape as /battle
-  const result = simulateBattle({ sides: [{ members }, { members: foes }], seed: seed + 2 * i + 1, surge });
-  const won = result.winner === 0;
-  const knockedOut = result.knockouts.filter((k) => k.bySide === 0).map((k) => foes[k.slot]);
-  const gains = teamExp({ members: team, knockedOut, won });
-  return { opponentKey: opponent.key, members, foes, powers, surge, result, won, gains };
+  // `engine` goes in with the fight, so the default simulateBattle (and a Fight record's re-run) fights on it too.
+  return after(simulate({ sides: [{ members, plan }, { members: foes, ...opponentPlan(opponent.key) }], seed: fightSeed, surge, ...(engine && { engine }) }), (result) => {
+    const won = result.winner === 0;
+    const knockedOut = result.knockouts.filter((k) => k.bySide === 0).map((k) => foes[k.slot]);
+    const gains = teamExp({ members: team, knockedOut, won });
+    return { opponentKey: opponent.key, members, foes, powers, surge, result, won, gains, mythics };
+  });
 }
 
-// The Team for the next fight: each member keeps its HP fraction from `hp`,
-// and a Revive brings `slot` back at full HP if it fainted. Any other slot
-// (null, out of range, still standing) revives nothing, so `slot` comes back null.
-function carryHp(team, hp, slot) {
+/** The engine a run fights on, fixed when it starts so a flipped switch can't mix engines. */
+const engineNow = () => (isFullSimEnabled() ? "full" : "legacy");
+const liveOn = (engine) => (input) => simulateLive({ ...input, engine });
+/** The Battle plan of the Team the player picked (Casual or Ranked). */
+const planFor = (user, pick) => getPlan(user, pick === "ranked" ? "battle" : "display");
+
+// The Team for the next fight: each member keeps its HP fraction from `hp`
+// and (full sim) its major status from `status`, and a Revive brings `slot`
+// back at full HP with no status if it fainted. Any other slot (null, out
+// of range, still standing) revives nothing, so `slot` comes back null.
+export function carryHp(team, hp, status, slot) {
   const revived = Number.isInteger(slot) && hp[slot] === 0 ? slot : null;
-  return { slot: revived, members: team.map((m, s) => ({ ...m, hpFraction: s === revived ? 1 : hp[s] })) };
+  return {
+    slot: revived,
+    members: team.map((m, s) => {
+      const kept = s !== revived && status?.[s];
+      return { ...m, hpFraction: s === revived ? 1 : hp[s], ...(kept && { status: status[s] }) };
+    }),
+  };
 }
 
 // Pure. Fights each opponent in order, carrying the player's HP from one
 // fight to the next, and stops at the first loss. Levels stay fixed for the
 // whole run. After each win but the last, if anyone fainted, pick({ team, hp,
 // next }) chooses a Revive; breaks[k] records the break after fight k.
-export function simulateChallenge({ team, opponents, seed, pick = () => null }) {
+export function simulateChallenge({ team, opponents, seed, plan, engine, pick = () => null, simulate = simulateBattle }) {
   const fights = [];
   const breaks = [];
-  let members = team;
-  for (const [i, opponent] of opponents.entries()) {
-    const fight = simulateFight({ team, members, opponent, i, seed });
+  const fightFrom = (i, members) => after(simulateFight({ team, members, opponent: opponents[i], i, seed, plan, engine, simulate }), (fight) => {
     fights.push(fight);
     if (!fight.won) return { fights, cleared: false, breaks };
-    if (i === opponents.length - 1) break;
+    if (i === opponents.length - 1) return { fights, cleared: true, breaks };
     const hp = fight.result.snapshots.at(-1)[0];
     const offered = hp.includes(0);
-    const carried = carryHp(team, hp, offered ? pick({ team, hp, next: opponents[i + 1] }) : null);
+    const carried = carryHp(team, hp, fight.result.endStatus?.[0], offered ? pick({ team, hp, next: opponents[i + 1] }) : null);
     breaks.push({ offered, slot: carried.slot });
-    members = carried.members;
-  }
-  return { fights, cleared: true, breaks };
+    return fightFrom(i + 1, carried.members);
+  });
+  return opponents.length ? fightFrom(0, team) : { fights, cleared: true, breaks };
 }
 
 function grantPrize(user, prize) {
@@ -154,6 +206,7 @@ const outcomeFight = (userId, f) => ({
   result: f.result,
   winnerId: f.won ? userId : f.opponentKey,
   gains: f.gains,
+  mythics: f.mythics,
 });
 
 const owns = (user, m) => ownsVariant(user, m.speciesId, m.variant);
@@ -195,13 +248,16 @@ export function runChallenge({ trainerData, userId, key, seed, maxLoss = Infinit
   if (reason) return { ok: false, reason };
   const user = trainerData[userId];
   const team = teamForPick(user, pick); // Casual or Ranked, real Levels
-  const { fights, cleared } = simulateChallenge({ team, opponents: CHALLENGES[key].opponents, seed });
-  const totals = team.map((_, i) => fights.reduce((t, f) => t + f.gains[i], 0));
-  const day = utcDay(now);
-  getChallengeRecord(user, day).attempts++;
-  const beaten = fights.filter((f) => f.won).map((f) => f.opponentKey);
-  const settled = settle({ user, userId, key, team, totals, cleared, day, maxLoss, now, beaten });
-  return { ok: true, key, userId, seed, fights: fights.map((f) => outcomeFight(userId, f)), cleared, ...settled };
+  const engine = engineNow();
+  const plan = planFor(user, pick);
+  return after(simulateChallenge({ team, opponents: CHALLENGES[key].opponents, seed, plan, engine, simulate: liveOn(engine) }), ({ fights, cleared }) => {
+    const totals = team.map((_, i) => fights.reduce((t, f) => t + f.gains[i], 0));
+    const day = utcDay(now);
+    getChallengeRecord(user, day).attempts++;
+    const beaten = fights.filter((f) => f.won).map((f) => f.opponentKey);
+    const settled = settle({ user, userId, key, team, totals, cleared, day, maxLoss, now, beaten });
+    return { ok: true, key, userId, seed, engine, plan, fights: fights.map((f) => outcomeFight(userId, f)), cleared, ...settled };
+  });
 }
 
 // ==========================================================
@@ -224,42 +280,52 @@ const RUN = CHALLENGES.elite4.opponents;
 function playStep(user, userId, members, now) {
   const run = user.challenge.run;
   const i = run.next;
-  const fight = simulateFight({ team: run.team, members: withMegaStats(members), opponent: RUN[i], i, seed: run.seed });
-  run.gains = run.gains.map((g, slot) => g + fight.gains[slot]);
-  run.fights.push({ opponentKey: fight.opponentKey, won: fight.won });
-  run.hp = fight.result.snapshots.at(-1)[0];
-  run.next = i + 1;
-  run.updatedAt = now.getTime();
-  const fights = [
-    ...run.fights.slice(0, -1).map((f) => ({ opponentKey: f.opponentKey, winnerId: f.won ? userId : f.opponentKey })),
-    outcomeFight(userId, fight),
-  ];
-  const view = { key: "elite4", userId, fights, breaks: [...run.breaks] };
-  const base = { ok: true, nonce: run.nonce, step: i, view };
-  if (fight.won && run.next < RUN.length) {
-    const fainted = run.hp.flatMap((h, slot) => (h === 0 ? [{ slot, name: run.team[slot].name, level: run.team[slot].level }] : []));
-    return { ...base, ended: false, outcome: null, fainted, next: RUN[run.next] };
-  }
-  const cleared = fight.won;
-  delete user.challenge.run;
-  const settled = settle({
-    user, userId, key: "elite4", team: run.team, totals: run.gains, cleared, day: run.day, maxLoss: run.maxLoss ?? Infinity, now,
-    beaten: run.fights.filter((f) => f.won).map((f) => f.opponentKey),
+  const engine = run.engine ?? "legacy"; // runs saved before the full sim have no stamp
+  return after(simulateFight({ team: run.team, members: withMegaStats(members), opponent: RUN[i], i, seed: run.seed, plan: run.plan, engine, simulate: liveOn(engine) }), (fight) => {
+    run.gains = run.gains.map((g, slot) => g + fight.gains[slot]);
+    run.fights.push({ opponentKey: fight.opponentKey, won: fight.won });
+    run.hp = fight.result.snapshots.at(-1)[0];
+    run.status = fight.result.endStatus?.[0] ?? null; // full sim: major status carries too
+    run.next = i + 1;
+    run.updatedAt = now.getTime();
+    const fights = [
+      ...run.fights.slice(0, -1).map((f) => ({ opponentKey: f.opponentKey, winnerId: f.won ? userId : f.opponentKey })),
+      outcomeFight(userId, fight),
+    ];
+    const view = { key: "elite4", userId, fights, breaks: [...run.breaks] };
+    const base = { ok: true, nonce: run.nonce, step: i, view };
+    if (fight.won && run.next < RUN.length) {
+      const fainted = run.hp.flatMap((h, slot) => (h === 0 ? [{ slot, name: run.team[slot].name, level: run.team[slot].level }] : []));
+      return { ...base, ended: false, outcome: null, fainted, next: RUN[run.next] };
+    }
+    const cleared = fight.won;
+    delete user.challenge.run;
+    const settled = settle({
+      user, userId, key: "elite4", team: run.team, totals: run.gains, cleared, day: run.day, maxLoss: run.maxLoss ?? Infinity, now,
+      beaten: run.fights.filter((f) => f.won).map((f) => f.opponentKey),
+    });
+    // runTeam: the frozen team, so Battle Records can re-run the earlier
+    // fights (utils/fightRecordBuild.js); only the last one's result is kept here.
+    const outcome = { ok: true, key: "elite4", userId, seed: run.seed, engine, plan: run.plan, fights, breaks: view.breaks, cleared, runTeam: run.team, ...settled };
+    return { ...base, ended: true, outcome, fainted: [], next: null };
   });
-  // runTeam: the frozen team, so Battle Records can re-run the earlier
-  // fights (utils/fightRecordBuild.js); only the last one's result is kept here.
-  const outcome = { ok: true, key: "elite4", userId, seed: run.seed, fights, breaks: view.breaks, cleared, runTeam: run.team, ...settled };
-  return { ...base, ended: true, outcome, fainted: [], next: null };
 }
 
 // Closes the break before fight run.next with a Revive of `slot` (when
 // something fainted; anything invalid revives nothing) and plays that fight.
 function breakThenPlay(user, userId, slot, now) {
   const run = user.challenge.run;
+  // A save while a fight was on the sim worker (full sim) can hold a run
+  // whose fight never finished. No HP yet: its first fight never finished,
+  // so play it again. Breaks already recorded for this fight are dropped,
+  // so the retry records it once (breaks[k] is the break after fight k).
+  if (!Array.isArray(run.hp)) return playStep(user, userId, run.team, now);
+  if (run.breaks.length > run.next - 1) run.breaks.length = Math.max(0, run.next - 1);
   const offered = run.hp.includes(0);
-  const carried = carryHp(run.team, run.hp, offered ? slot : null);
+  const carried = carryHp(run.team, run.hp, run.status, offered ? slot : null);
   run.breaks.push({ offered, slot: carried.slot });
-  return playStep(user, userId, carried.members, now);
+  // A fight that fails (full sim: the worker can) leaves the run as it was, so trying again plays the same fight.
+  return undoOnFailure(() => playStep(user, userId, carried.members, now), () => run.breaks.pop());
 }
 
 export function startRun({ trainerData, userId, seed, maxLoss = Infinity, channelId = null, now = new Date(), pick = "casual" }) {
@@ -273,10 +339,17 @@ export function startRun({ trainerData, userId, seed, maxLoss = Infinity, channe
   record.run = {
     nonce: randomUUID(), seed,
     maxLoss: Number.isFinite(maxLoss) ? maxLoss : null, // the record is saved as JSON, which has no Infinity
-    day, team: withoutMegaStats(team), hp: null, next: 0, gains: team.map(() => 0), fights: [], breaks: [],
+    day, team: withoutMegaStats(team), hp: null, next: 0, gains: team.map(() => 0), fights: [], breaks: [], engine: engineNow(),
+    plan: planFor(user, pick), // frozen with the team, so the whole run plays one plan
     updatedAt: now.getTime(), channelId, messageId: null,
   };
-  return playStep(user, userId, record.run.team, now);
+  // A first fight that fails leaves no run open and spends no attempt.
+  const { nonce } = record.run;
+  return undoOnFailure(() => playStep(user, userId, record.run.team, now), () => {
+    if (record.run?.nonce !== nonce) return;
+    delete record.run;
+    record.attempts--;
+  });
 }
 
 // `step` is the index of the fight to play next; `slot` is the picked Revive,
@@ -292,22 +365,40 @@ export function continueRun({ trainerData, userId, nonce, step, slot, now = new 
 export function finishOpenRun({ trainerData, userId, now = new Date() }) {
   const user = trainerData[userId];
   if (!user?.challenge?.run) return null;
-  let step;
-  do step = breakThenPlay(user, userId, null, now);
-  while (!step.ended);
-  return step.outcome;
+  const next = () => after(breakThenPlay(user, userId, null, now), (step) => (step.ended ? step.outcome : next()));
+  return next();
 }
 
 export const isRunStale = (user, now = new Date()) =>
   !!user?.challenge?.run && now.getTime() - user.challenge.run.updatedAt > CHALLENGE.staleRunMs;
 
+// One run after another; a Promise when any of them fights on the full sim.
+// A run that can't finish (its fight fails) stays open for the next start
+// and doesn't stop the others.
 export function finishAllOpenRuns(trainerData, now = new Date()) {
-  return Object.keys(trainerData).flatMap((userId) => {
-    const run = trainerData[userId]?.challenge?.run;
-    if (!run) return [];
-    const { channelId, messageId } = run;
-    return [{ userId, outcome: finishOpenRun({ trainerData, userId, now }), channelId, messageId }];
-  });
+  const open = Object.keys(trainerData).filter((userId) => trainerData[userId]?.challenge?.run);
+  const done = [];
+  const finishFrom = (k) => {
+    if (k === open.length) return done;
+    const userId = open[k];
+    const { channelId, messageId } = trainerData[userId].challenge.run;
+    const finished = (outcome) => {
+      done.push({ userId, outcome, channelId, messageId });
+      return finishFrom(k + 1);
+    };
+    const skipped = (err) => {
+      console.warn(`⚠️ couldn't finish the open Elite Four run of ${userId}:`, err?.message || err);
+      return finishFrom(k + 1);
+    };
+    let outcome;
+    try {
+      outcome = finishOpenRun({ trainerData, userId, now });
+    } catch (err) {
+      return skipped(err);
+    }
+    return outcome && typeof outcome.then === "function" ? outcome.then(finished, skipped) : finished(outcome);
+  };
+  return finishFrom(0);
 }
 
 // The player's record as the dashboard gets it. An open run's seed decides

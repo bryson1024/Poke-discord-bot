@@ -71,6 +71,13 @@
    "decision": "D2",
    "reason": "Cover legendary with BST ≥ 660 → mythic, like Mewtwo, Lugia, Kyogre, Reshiram…"
   },
+  "486": {
+   "name": "Regigigas",
+   "from": "legendary",
+   "tier": "mythic",
+   "decision": "D10",
+   "reason": "Owner decision 2026-11-16: official legendary with BST 670, over the 660 mythic line (D2)"
+  },
   "487": {
    "name": "Giratina-altered",
    "from": "legendary",
@@ -106,6 +113,83 @@
    "decision": "D2",
    "reason": "Cover legendary with BST ≥ 660 → mythic, like Mewtwo, Lugia, Kyogre, Reshiram…"
   },
+  "718": {
+   "name": "Zygarde",
+   "from": "legendary",
+   "tier": "mythic",
+   "decision": "D10",
+   "reason": "Owner decision 2026-11-16: cover legendary of Pokémon Z, mythic like the other box legendaries"
+  },
+  "793": {
+   "name": "Nihilego",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D11",
+   "reason": "Owner decision 2026-11-16: Ultra Beast, rarer and stronger (BST 540–570) than the starter finals already in legendary"
+  },
+  "794": {
+   "name": "Buzzwole",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D11",
+   "reason": "Owner decision 2026-11-16: Ultra Beast, rarer and stronger (BST 540–570) than the starter finals already in legendary"
+  },
+  "795": {
+   "name": "Pheromosa",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D11",
+   "reason": "Owner decision 2026-11-16: Ultra Beast, rarer and stronger (BST 540–570) than the starter finals already in legendary"
+  },
+  "796": {
+   "name": "Xurkitree",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D11",
+   "reason": "Owner decision 2026-11-16: Ultra Beast, rarer and stronger (BST 540–570) than the starter finals already in legendary"
+  },
+  "797": {
+   "name": "Celesteela",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D11",
+   "reason": "Owner decision 2026-11-16: Ultra Beast, rarer and stronger (BST 540–570) than the starter finals already in legendary"
+  },
+  "798": {
+   "name": "Kartana",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D11",
+   "reason": "Owner decision 2026-11-16: Ultra Beast, rarer and stronger (BST 540–570) than the starter finals already in legendary"
+  },
+  "799": {
+   "name": "Guzzlord",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D11",
+   "reason": "Owner decision 2026-11-16: Ultra Beast, rarer and stronger (BST 540–570) than the starter finals already in legendary"
+  },
+  "804": {
+   "name": "Naganadel",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D11",
+   "reason": "Owner decision 2026-11-16: Ultra Beast, rarer and stronger (BST 540–570) than the starter finals already in legendary"
+  },
+  "805": {
+   "name": "Stakataka",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D11",
+   "reason": "Owner decision 2026-11-16: Ultra Beast, rarer and stronger (BST 540–570) than the starter finals already in legendary"
+  },
+  "806": {
+   "name": "Blacephalon",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D11",
+   "reason": "Owner decision 2026-11-16: Ultra Beast, rarer and stronger (BST 540–570) than the starter finals already in legendary"
+  },
   "863": {
    "name": "Perrserker",
    "from": "uncommon",
@@ -140,6 +224,13 @@
    "tier": "mythic",
    "decision": "D2",
    "reason": "Cover legendary with BST ≥ 660 → mythic, like Mewtwo, Lugia, Kyogre, Reshiram…"
+  },
+  "891": {
+   "name": "Kubfu",
+   "from": "legendary",
+   "tier": "epic",
+   "decision": "D10",
+   "reason": "Owner decision 2026-11-16: unevolved stage (BST 385); Urshifu stays legendary"
   },
   "899": {
    "name": "Wyrdeer",
@@ -203,6 +294,90 @@
    "tier": "rare",
    "decision": "D5",
    "reason": "New evolution of an older species, but BST 430–440 sits in epic's bottom 10%: rare, like Ambipom"
+  },
+  "984": {
+   "name": "Great Tusk",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
+  },
+  "985": {
+   "name": "Scream Tail",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
+  },
+  "986": {
+   "name": "Brute Bonnet",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
+  },
+  "987": {
+   "name": "Flutter Mane",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
+  },
+  "988": {
+   "name": "Slither Wing",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
+  },
+  "989": {
+   "name": "Sandy Shocks",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
+  },
+  "990": {
+   "name": "Iron Treads",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
+  },
+  "991": {
+   "name": "Iron Bundle",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
+  },
+  "992": {
+   "name": "Iron Hands",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
+  },
+  "993": {
+   "name": "Iron Jugulis",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
+  },
+  "994": {
+   "name": "Iron Moth",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
+  },
+  "995": {
+   "name": "Iron Thorns",
+   "from": "epic",
+   "tier": "legendary",
+   "decision": "D12",
+   "reason": "Owner decision 2026-11-16: Paradox at BST 570, level with the Ultra Beasts (D11); every Paradox Pokémon is now legendary"
   },
   "1005": {
    "name": "Roaring Moon",

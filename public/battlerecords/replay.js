@@ -16,7 +16,7 @@ const FALLBACK = `onerror="this.onerror=null;this.src='/public/sprites/items/pok
 const BASE_MS = { intro: 1800, note: 1400, move: 1300, faint: 1100, result: 2200 };
 const reduceMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
-let state = null; // { record, me, mine, steps, at, playing, speed, timer, onClose }
+let state = null; // { record, me, mine, steps, at, playing, speed, timer, onClose, closeAtEnd }
 
 const hpClass = (f) => (f <= 0.2 ? "low" : f <= 0.5 ? "mid" : "");
 
@@ -85,7 +85,11 @@ function schedule() {
   if (!state.playing) return;
   const s = state.steps[state.at];
   state.timer = setTimeout(() => {
-    if (state.at >= state.steps.length - 1) { state.playing = false; draw(); return; }
+    if (state.at >= state.steps.length - 1) {
+      // The Battle page plays a fight before its result: the result shows once the replay ends.
+      if (state.closeAtEnd) return dialog.close();
+      state.playing = false; draw(); return;
+    }
     state.at++;
     draw();
     schedule();
@@ -115,13 +119,16 @@ function act(name) {
   } else if (name === "close") dialog.close();
 }
 
-/** Opens the viewer on a full record. `onClose` runs when it closes. */
-export function openReplay(record, me, { onClose = () => {} } = {}) {
+/**
+ * Opens the viewer on a full record. `onClose` runs when it closes.
+ * `closeAtEnd`: close by itself once it has played to the end.
+ */
+export function openReplay(record, me, { onClose = () => {}, closeAtEnd = false } = {}) {
   if (state?.record.id === record.id && dialog.open) return;
   if (state) clearTimeout(state.timer);
   const steps = replaySteps(record, me);
   const mine = Math.max(0, record.sides.findIndex((s) => s.id === String(me)));
-  state = { record, me, mine, steps, at: 0, playing: !reduceMotion(), speed: 1, timer: null, onClose };
+  state = { record, me, mine, steps, at: 0, playing: !reduceMotion(), speed: 1, timer: null, onClose, closeAtEnd };
   dialog.innerHTML = `<div class="rv">
     <div class="rv-top"><h2></h2><span class="rv-turn" aria-live="off"></span>
       <button type="button" class="cc-btn" data-act="close" aria-label="Close replay">✕</button></div>

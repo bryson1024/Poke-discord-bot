@@ -107,6 +107,8 @@ const MEGA_USERS = [
   "services/megaUnlocks.js", "utils/megas.js", "utils/userSchema.js", "public/picker-pokemon/script.js", "public/picker-pokemon/mega.js",
   // Phase M2: the battle engine (Mega participants, abilities, rendering).
   "utils/battle/runBattle.js", "utils/battle/sim.js", "utils/battle/effects.js", "utils/battle/abilities.js", "utils/battle/power.js", "utils/battle/render.js",
+  // Full sim: a Mega slot's set fights as its Showdown forme (showdownName).
+  "utils/battle/showdown/sets.js",
   // Phase M3: presentation only (shared Mega display rules, Mega sprite files, the EXP card).
   "utils/megaDisplay.js", "utils/render/sprites.js", "utils/render/expCard.js",
   // Teams: the Battle team reuses team validation and cleaning (one Mega per team).
@@ -122,6 +124,10 @@ const MEGA_USERS = [
   // Showcase team (three-teams split): shows any number of unlocked Megas
   // (read-only display checks: unlocked on the line, allowed on teams).
   "services/showcaseTeam.js", "utils/render/teamView.js",
+  // Dashboard fights: its own switch (DASHBOARD_FIGHTS_ENABLED) lives in config/features.js.
+  "services/dashboardFights.js",
+  // Black/White Kyurem: their own switch (KYUREM_FUSION_ENABLED) lives in config/features.js. No Mega code.
+  "utils/fusions.js", "services/fusionTeam.js",
 ];
 const megaModule = /megaUnlocks\.js|megas\.js|config\/features\.js|megaRewards\.js|megaApi\.js|megaTeam\.js|\/mega\.js|"\.\/mega\.js"/;
 const users = live.filter((f) => megaModule.test(fs.readFileSync(path.join(ROOT, f), "utf8")));

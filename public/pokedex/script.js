@@ -3,11 +3,15 @@
 // Every species, by region: caught (✓, and ✨ if a shiny was ever caught)
 // or not yet (silhouette). Read-only. Reads GET /api/user-pokemon
 // (pokedex, pokemon), /public/pokemonData.json and /api/pokedex-status.
+// A caught entry opens the details drawer in Pokédex mode: base stats and
+// every move it can learn (level-up with Levels, TMs), with a filter.
 // ==========================================================
 
 import { playerId, pageHref, showBanner, showExpired } from "/public/shared/shell.js";
 import { displaySpeciesName } from "/public/shared/names.js";
 import { getRegions, countRegistered } from "/public/picker-pokemon/regions.js";
+import { viewState, debounce } from "/public/shared/viewState.js";
+import { openDetail } from "/public/picker-pokemon/detail.js";
 
 const app = document.getElementById("dxApp");
 const id = playerId();
@@ -15,6 +19,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const fmt = (n) => Number(n ?? 0).toLocaleString("en-US");
 
 const state = { show: "all", region: "", search: "", shinyView: new Set() };
+// Show, region and search survive a trip to another page (this browser tab only).
+const view = viewState("pokedex", { show: "all", region: "", search: "" });
+const remember = () => view.set({ show: state.show, region: state.region }); // search is saved as typed, on input
 let data = {}, regions = [], dex = {}, owned = {};
 
 async function getJSON(url) {
@@ -57,7 +64,9 @@ function entry(sid) {
     ? `<span class="dx-mark caught" title="Caught">✓</span>${hasShiny ? `<span class="dx-mark shiny" title="Shiny caught">✨</span>` : ""}<span class="dx-mark box" title="${n ? `${n} in your Collection` : "None in your Collection now"}">${n ? `×${n}` : "0"}</span>`
     : "";
   const label = `#${sid} ${caught ? p.name : "not caught yet"}${hasShiny ? ", shiny caught" : ""}${caught ? `, ${n} in your Collection` : ""}`;
-  return `<li class="dx-entry ${caught ? "caught" : "missing"}${showShiny ? " shiny" : ""}" aria-label="${esc(label)}">
+  // Caught: the entry opens its details (moves it can learn). Missing ones stay silhouettes.
+  const open = caught ? ` data-detail="${sid}" role="button" tabindex="0" data-cc-activate="1"` : "";
+  return `<li class="dx-entry ${caught ? "caught" : "missing"}${showShiny ? " shiny" : ""}" aria-label="${esc(caught ? `${label}. Details` : label)}"${open}>
     <span class="dx-no">#${String(sid).padStart(4, "0")}</span>
     ${hasShiny && (m & 1) ? `<button type="button" class="dx-toggle" data-shiny="${sid}" aria-pressed="${showShiny}" aria-label="${showShiny ? "Show normal" : "Show shiny"} ${esc(p.name)}">✨</button>` : ""}
     <img src="${src}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/public/sprites/items/pokeball.png'">
@@ -117,13 +126,22 @@ async function load() {
   }
   data = shown;
   regions = getRegions(data);
+  const kept = view.get();
+  if (["all", "caught", "missing", "shiny"].includes(kept.show)) state.show = kept.show;
+  if (regions.some((r) => r.name === kept.region)) state.region = kept.region;
+  state.search = kept.search.trim().toLowerCase();
+  document.getElementById("dxSearch").value = kept.search;
+  for (const x of document.querySelectorAll("[data-show]")) x.setAttribute("aria-pressed", String(x.dataset.show === state.show));
   render();
+  view.trackScroll();
+  view.restoreScroll();
 }
 
 document.querySelector(".dx-seg").addEventListener("click", (e) => {
   const b = e.target.closest("[data-show]");
   if (!b) return;
   state.show = b.dataset.show;
+  remember();
   for (const x of document.querySelectorAll("[data-show]")) x.setAttribute("aria-pressed", String(x === b));
   render();
 });
@@ -131,15 +149,34 @@ document.getElementById("dxRegions").addEventListener("click", (e) => {
   const b = e.target.closest("[data-region]");
   if (!b) return;
   state.region = b.dataset.region;
+  remember();
   render();
 });
+const renderSoon = debounce(render, 120);
 document.getElementById("dxSearch").addEventListener("input", (e) => {
   state.search = e.target.value.trim().toLowerCase();
-  render();
+  view.set({ search: e.target.value });
+  renderSoon();
 });
+const detailContext = () => ({
+  userId: id,
+  apiJSON: getJSON,
+  // Owned now: a link to its copies in the Collection. Nothing to do otherwise.
+  actionsHTML: (d, variant) => `<a class="cc-btn cc-btn--primary" href="/public/picker-pokemon/?${esc(new URLSearchParams({ ...(id ? { id } : {}), pokemon: d.id, variant }))}">Open in Collection</a>`,
+  onAction: () => {},
+});
+
 app.addEventListener("click", (e) => {
   const b = e.target.closest("[data-shiny]");
-  if (!b) return;
+  if (!b) {
+    const entry = e.target.closest("[data-detail]");
+    if (entry) {
+      const sid = Number(entry.dataset.detail);
+      const shiny = entry.classList.contains("shiny");
+      openDetail(sid, detailContext(), { mode: "dex", variant: shiny ? "shiny" : "normal" });
+    }
+    return;
+  }
   const sid = Number(b.dataset.shiny);
   if (state.shinyView.has(sid)) state.shinyView.delete(sid); else state.shinyView.add(sid);
   render();

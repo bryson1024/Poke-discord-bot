@@ -7652,7 +7652,7 @@
   "486": {
     "id": 486,
     "name": "Regigigas",
-    "tier": "legendary",
+    "tier": "mythic",
     "region": "Sinnoh",
     "generation": 4,
     "types": [
@@ -11465,7 +11465,7 @@
   "718": {
     "id": 718,
     "name": "Zygarde",
-    "tier": "legendary",
+    "tier": "mythic",
     "region": "Kalos",
     "generation": 6,
     "types": [
@@ -12812,7 +12812,7 @@
   "793": {
     "id": 793,
     "name": "Nihilego",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Alola",
     "generation": 7,
     "types": [
@@ -12829,7 +12829,7 @@
   "794": {
     "id": 794,
     "name": "Buzzwole",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Alola",
     "generation": 7,
     "types": [
@@ -12846,7 +12846,7 @@
   "795": {
     "id": 795,
     "name": "Pheromosa",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Alola",
     "generation": 7,
     "types": [
@@ -12863,7 +12863,7 @@
   "796": {
     "id": 796,
     "name": "Xurkitree",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Alola",
     "generation": 7,
     "types": [
@@ -12879,7 +12879,7 @@
   "797": {
     "id": 797,
     "name": "Celesteela",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Alola",
     "generation": 7,
     "types": [
@@ -12896,7 +12896,7 @@
   "798": {
     "id": 798,
     "name": "Kartana",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Alola",
     "generation": 7,
     "types": [
@@ -12913,7 +12913,7 @@
   "799": {
     "id": 799,
     "name": "Guzzlord",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Alola",
     "generation": 7,
     "types": [
@@ -12998,7 +12998,7 @@
   "804": {
     "id": 804,
     "name": "Naganadel",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Alola",
     "generation": 7,
     "types": [
@@ -13022,7 +13022,7 @@
   "805": {
     "id": 805,
     "name": "Stakataka",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Alola",
     "generation": 7,
     "types": [
@@ -13039,7 +13039,7 @@
   "806": {
     "id": 806,
     "name": "Blacephalon",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Alola",
     "generation": 7,
     "types": [
@@ -14568,7 +14568,7 @@
   "891": {
     "id": 891,
     "name": "Kubfu",
-    "tier": "legendary",
+    "tier": "epic",
     "region": "Galar",
     "generation": 8,
     "types": [
@@ -16265,7 +16265,7 @@
   "984": {
     "id": 984,
     "name": "Great Tusk",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16282,7 +16282,7 @@
   "985": {
     "id": 985,
     "name": "Scream Tail",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16299,7 +16299,7 @@
   "986": {
     "id": 986,
     "name": "Brute Bonnet",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16316,7 +16316,7 @@
   "987": {
     "id": 987,
     "name": "Flutter Mane",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16333,7 +16333,7 @@
   "988": {
     "id": 988,
     "name": "Slither Wing",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16350,7 +16350,7 @@
   "989": {
     "id": 989,
     "name": "Sandy Shocks",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16367,7 +16367,7 @@
   "990": {
     "id": 990,
     "name": "Iron Treads",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16384,7 +16384,7 @@
   "991": {
     "id": 991,
     "name": "Iron Bundle",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16401,7 +16401,7 @@
   "992": {
     "id": 992,
     "name": "Iron Hands",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16418,7 +16418,7 @@
   "993": {
     "id": 993,
     "name": "Iron Jugulis",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16435,7 +16435,7 @@
   "994": {
     "id": 994,
     "name": "Iron Moth",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16452,7 +16452,7 @@
   "995": {
     "id": 995,
     "name": "Iron Thorns",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [

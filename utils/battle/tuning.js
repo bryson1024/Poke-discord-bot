@@ -41,7 +41,17 @@ export const CATCH_RANGES = {
 };
 export const CATCH_SKEW = 2; // > 1 leans rolls toward the low end
 export const CATCH_TAIL_CHANCE = 0.03;
-export const DUPLICATE_LEVEL_SHARE = 0.5; // of the EXP needed for the next Level
+// Rare Candy: one candy adds a share of the EXP the Pokémon needs for its
+// next Level, by Level band, so Pokémon that are already strong gain slowly.
+// Same for every Tier. [from Level, share], highest first:
+// below Lv 30 a full Level, 30-49 half, 50-79 a quarter, 80-99 an eighth.
+export const RARE_CANDY_LEVEL_BANDS = Object.freeze([[80, 0.125], [50, 0.25], [30, 0.5], [1, 1]]);
+export const rareCandyShare = (level) => RARE_CANDY_LEVEL_BANDS.find(([from]) => level >= from)?.[1] ?? 1;
+// Rare Candy drops: every /daily, every weekly pack, chat-message chance.
+// Not sold in any shop.
+export const RARE_CANDY_DAILY = 2;
+export const RARE_CANDY_WEEKLY_BUNDLE = 10;
+export const RARE_CANDY_CHAT_CHANCE = 0.01;
 
 // Battle EXP (Gen V formula). 0.035 ≈ 2 months from Lv 5 → 100 at 10 battles/day.
 export const BST_YIELD_SCALE = 0.035;
@@ -53,7 +63,13 @@ export const ELO = { start: 1000, k: 32 };
 // Levels unchanged; EXP still uses them). `season` resets every ranked
 // record when it changes (owner decision: all ratings reset at launch).
 export const RANKED = { level: 50, season: 1 };
-export const CAPS = { perDay: 10, perOpponent: 3 };
+// defendedPerDay: casual and ranked battles a Defender earns EXP from per
+// UTC day (any Challengers). Being challenged costs the Defender none of
+// their own perDay battles.
+export const CAPS = { perDay: 10, perOpponent: 3, defendedPerDay: 10 };
+// A Defender's EXP in casual and ranked battles (they didn't pick the fight):
+// this share of what the Challenger's formula pays. Wagers pay both in full.
+export const DEFENDER_EXP_MULT = 0.5;
 // minAccountDays / minDex (economy audit 2026-11, D4): both players' Discord
 // accounts must be this old, and both must have this many species
 // registered, since a Wager is the only way CC moves between players.
@@ -79,6 +95,41 @@ export const CHALLENGE = {
 // tests turns kept the 2 s pace with up to 5 at once and slipped at 6; a Fly
 // shared CPU is about half as fast, so 2 keeps a margin.
 export const PLAYBACK = { maxUpdates: 12, delayMs: 2000, maxAtOnce: 2 };
+// Full sim (FULL_SIM_ENABLED): a full-sim replay gets more updates, since
+// its turns carry status, hazards and switches as well as hits.
+// challengeStatBoost: CHALLENGE.statBoost on the full sim, per Challenge
+// opponent. Every one of them is an Expert there (catalog/opponentPlans.js),
+// so each Challenge gets the hidden boost that brings its gate Level back
+// to today's: `node tools/challenge-gates.mjs <key> --target <today's gate>`
+// (2026-11-12, n 200), checked by tests/fullSimChallengeBalance.slow.js.
+// Lt. Surge and Giovanni come out above 1.1: they were easier on the full
+// sim even as Experts. The Elite Four is the exception (owner decision,
+// 2026-11-12): its gate is Lv 70 rather than today's 73, so its boost is
+// just under 1 (`--target 70`, 1437 s).
+// mythicStatBoost (owner decision, 2026-11-14): the Elite Four, Blue and
+// Red's boost against a Team with 3 or more mythic-tier Pokémon; 1 and 2
+// mythics move a third and two thirds of the way from challengeStatBoost
+// (utils/challenge/runChallenge.js). Without it, 3 mythics cleared them about
+// 10 Levels lower than none (Elite Four 70 to 60, Blue 79 to 69, Red 90 to
+// 80). Each value puts 3 mythics 5 Levels lower:
+// `node tools/challenge-gates.mjs <key> --target <gate − 5> --mythics 3`
+// (2026-11-14, n 200; Elite Four 2440 s), checked by
+// tests/fullSimMythicBalance.slow.js.
+const ELITE_FOUR = 0.99;
+const ELITE_FOUR_MYTHIC = 1.09;
+export const FULL_SIM = {
+  maxUpdates: 20,
+  challengeStatBoost: Object.freeze({
+    brock: 1.08, misty: 1.07, surge: 1.17, erika: 1.04, koga: 1.09, sabrina: 1.05, blaine: 1.05, giovanni: 1.12,
+    lorelei: ELITE_FOUR, bruno: ELITE_FOUR, agatha: ELITE_FOUR, lance: ELITE_FOUR,
+    blue: 1.07, red: 1.04,
+  }),
+  mythicStatBoost: Object.freeze({
+    lorelei: ELITE_FOUR_MYTHIC, bruno: ELITE_FOUR_MYTHIC, agatha: ELITE_FOUR_MYTHIC, lance: ELITE_FOUR_MYTHIC,
+    blue: 1.15, red: 1.1,
+  }),
+  mythicCap: 3,
+};
 // Trainer encounters (docs/superpowers/specs/2026-11-10-trainer-encounters-design.md;
 // every value decided 2026-11-10 unless dated). chance (1.5%, decided
 // 2026-11-11): per message that earns TP, after a miss on the catch roll. gapMs and perDay count every posted card, run

@@ -11,7 +11,7 @@ import {
 } from "../utils/specialVariants.js";
 import { getSpecies, getMove } from "../utils/battle/data.js";
 import {
-  grantSpecial, ownedCount, isSpecialCopy, variantOf, copiesOf, spareCopies, canFeed, adoptCopy, normalizeBox, addCopy, DEX_NORMAL,
+  grantSpecial, ownedCount, isSpecialCopy, variantOf, copiesOf, spareCopies, canUseRareCandy, adoptCopy, normalizeBox, addCopy, DEX_NORMAL,
 } from "../services/box.js";
 import { expForLevel, levelForExp } from "../utils/training.js";
 import { canRemoveCopies, removeCopies, canTransformCopy, createTrainedCopy, normalizeCustomPokemon } from "../services/ownership.js";
@@ -169,8 +169,8 @@ section("box");
   assertEqual(copiesOf(u, 7, "normal").map((c) => c.uid), [p30], "copiesOf normal excludes the Leader");
   assertEqual(copiesOf(u, 7, "squad-leader").map((c) => c.uid), [leader], "copiesOf squad-leader is only the Leader");
   assertEqual(spareCopies(u, 7, "normal").map((c) => c.uid), [p30], "spareCopies never offers the Leader, even with the lowest EXP");
-  assertEqual(canFeed(u, { from: leader, to: p30 }).code, "special", "the Leader can't be fed");
-  assertEqual(canFeed(u, { from: p30, to: leader }).code, "special", "nothing can be fed to the Leader");
+  // Rare Candy only adds EXP, so the Leader can have it (tests/gameplayRoutes.test.js checks its line).
+  assertEqual(canUseRareCandy(u, { uid: leader, qty: 1 }).ok, true, "the Leader can have Rare Candy");
   let threw = false;
   try { adoptCopy(u, { rec: u.box[leader] }); } catch { threw = true; }
   assertTrue(threw, "adoptCopy refuses a Special record (a Gift never carries one)");
@@ -492,12 +492,16 @@ section("dashboard");
   // tests/bulkRules.test.js, this reads their source.
   const src = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
   const evoLine = src("public/picker-pokemon/detail.js").split("\n").find((l) => l.includes("<h3>Evolution</h3>")) ?? "";
-  assertTrue(/evo\.length > 1 && !isSpecial\(shownVariant\)/.test(evoLine), "the details drawer hides the Evolution line while the Leader's copy is shown");
+  assertTrue(/evo\.length > 1 && \(dexMode \|\| !isSpecial\(shownVariant\)\)/.test(evoLine), "the details drawer hides the Evolution line while the Leader's copy is shown, and the Pokédex still shows it");
   const picker = src("public/picker-pokemon/script.js");
   const start = picker.indexOf("const tile = (c) =>");
   const badges = picker.slice(picker.indexOf("let badge", start), picker.indexOf("const teamBadge", start));
   const guard = badges.indexOf("if (!c.special) {");
   assertTrue(guard >= 0 && ["donate-value", "shiny_dust.png", "evolution_stone.png"].every((b) => badges.indexOf(b) > guard), "the Leader's Collection tile shows no CC, Dust or stone badge");
+  const lock = picker.slice(picker.indexOf("function boxTileLocked("), picker.indexOf("function renderBoxTiles("));
+  assertTrue(/if \(c\.special && currentMode !== "browse" && currentMode !== "candy"\) return true;/.test(lock), "Rare Candy mode leaves the Leader's tile open");
+  assertTrue(/openDetail\(linked, detailContext\(\), \{ variant: variantKey\(params\.get\("variant"\)\)/.test(picker), "Open in Collection from the Teams page opens the Leader, not a plain Squirtle");
+  assertTrue(/const pokemonSprite = \(m\) => \(isSpecial\(m\.variant\) \? specialSprite\(m\.variant\)/.test(src("public/battle/script.js")), "the Battle page shows the Leader's own sprite");
 }
 
 section("final review");
@@ -597,6 +601,43 @@ section("final review");
   assertEqual(inspectSlots(u, { id: 7 }).map((x) => [x.variant, x.level]), [["normal", 30], ["squad-leader", 25]], "beside plain Squirtle, the Leader has its own card");
   const st = computeStats(LEADER_STATS, 25);
   assertTrue(battleInfo(only, 7).includes(`Squirtle Squad Leader Lv 25** · HP ${st.hp}`) && !/\*\*Your Lv/.test(battleInfo(only, 7)), "the text fallback names the Leader with its own stats");
+}
+
+section("master's newer code");
+{
+  // Code master added while this branch was open (abilities #154, Team check #147,
+  // full-sim recorded moves #143) keys a line by Variant; the Leader is its own line.
+  const { saveAbility, chosenAbility } = await import("../services/abilities.js");
+  const { teamCheck } = await import("../services/teamCheck.js");
+  const { defaultMoves } = await import("../services/fullSimCutover.js");
+  const { autoMoveset } = await import("../utils/battle/moveset.js");
+  const FULL = { FULL_SIM_ENABLED: "1" };
+
+  const { u, p30, leader } = squad();
+  const saved = saveAbility(u, { team: "display", pokeId: 7, variant: "squad-leader", ability: "Torrent", uid: leader }, { env: FULL });
+  assertEqual([saved.ok, saved.uid], [true, leader], "the Leader's Ability choice saves on its own copy");
+  assertEqual(chosenAbility(u, "display", 7, "normal", { uid: p30 }), null, "a plain Squirtle doesn't take the Leader's Ability choice");
+  saveAbility(u, { team: "battle", pokeId: 7, variant: "normal", ability: "Torrent" }, { env: FULL });
+  assertEqual(chosenAbility(u, "battle", 7, "squad-leader", { uid: leader }), null, "nor the Leader plain Squirtle's line choice");
+  const only = {};
+  grantSpecial(only, "squad-leader");
+  normalizeBox(only);
+  assertEqual(saveAbility(only, { team: "display", pokeId: 7, variant: "normal", ability: "Torrent" }, { env: FULL }).code, "unowned", "a Leader-only player owns no plain Squirtle to choose for");
+
+  const leaderOnly = Object.keys(only.box)[0];
+  const check = teamCheck(only, { team: "display", slots: [{ id: 7, variant: "squad-leader", uid: leaderOnly }] }, { env: {} });
+  assertEqual(check.check?.speed, [{ name: "Squirtle Squad Leader", speed: computeStats(LEADER_STATS, 25).spe }], "the Team check counts the Leader with its own name and stats");
+
+  const prev = process.env.FULL_SIM_ENABLED;
+  process.env.FULL_SIM_ENABLED = "1";
+  try {
+    const rec = { ...squad().u };
+    rec.fullSimMoves = { "7:normal": { moves: ["tackle", "tailwhip", "watergun", "withdraw"], level: 10 } };
+    assertEqual(defaultMoves(rec, { id: 7, variant: "squad-leader" }, 25), autoMoveset(7, 25), "on the full sim the Leader never takes plain Squirtle's recorded moves");
+  } finally {
+    if (prev === undefined) delete process.env.FULL_SIM_ENABLED;
+    else process.env.FULL_SIM_ENABLED = prev;
+  }
 }
 
 finish();

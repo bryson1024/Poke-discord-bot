@@ -21,13 +21,14 @@
 
 import { listCatalog, getCatalogItem } from "../catalog/items.js";
 import { getQuantity, grantItem } from "./inventory.js";
-import { canLearnByTm } from "../utils/battle/tmData.js";
+import { canLearnByTm, tmMoveAvailable } from "../utils/battle/tmData.js";
 import { getISOWeekKeyUTC } from "../utils/economyRules.js";
 import { isTmEnabled, tmWeeklyCap } from "../config/tmFeatures.js";
 import { trackProgress } from "../progression/achievements.js";
 import { liveEffects } from "./liveEvents.js";
 import { discountedPrice } from "../utils/liveEventRules.js";
-import { getSpecies } from "../utils/battle/data.js";
+import { getSpecies, getMove } from "../utils/battle/data.js";
+import { moveDetails } from "../utils/battle/moveText.js";
 import { getTraining } from "../utils/training.js";
 import { learnableMoves } from "./movesets.js";
 import { customCopiesOf, plainCount } from "./ownership.js";
@@ -48,7 +49,7 @@ const PRIORITY_TEAMS = new Set(["casual", "ranked"]);
 export function tmLearners(user, itemId, { env = process.env } = {}) {
   if (!isTmEnabled(env)) return fail(403, "TMs aren't available yet.", "disabled");
   const entry = getCatalogItem(itemId);
-  if (!entry || entry.category !== "tm" || entry.status !== "active") return fail(404, "Unknown TM.", "bad_item");
+  if (!entry || entry.category !== "tm" || entry.status !== "active" || !tmMoveAvailable(entry.tm.move, env)) return fail(404, "Unknown TM.", "bad_item");
   const move = entry.tm.move;
 
   // First team slot of each species:variant → [teamOrder, slotIndex].
@@ -84,8 +85,8 @@ export function tmLearners(user, itemId, { env = process.env } = {}) {
 }
 const fail = (status, error, code, extra = {}) => ({ ok: false, status, error, code, ...extra });
 
-/** Sold TM catalog entries (status active, shop eligible). */
-export const sellableTms = () => listCatalog().filter((i) => i.category === "tm" && i.status === "active" && i.shop?.eligible);
+/** Sold TM catalog entries (status active, shop eligible; full-sim TMs only while the full sim is on). */
+export const sellableTms = (env = process.env) => listCatalog().filter((i) => i.category === "tm" && i.status === "active" && i.shop?.eligible && tmMoveAvailable(i.tm.move, env));
 
 /** This week's purchases (0 when the counter is from another week). */
 export function tmBoughtThisWeek(user, now = new Date()) {
@@ -111,21 +112,25 @@ export function tmShopView(user, { env = process.env, now = new Date() } = {}) {
   const base = { enabled, cc: Number(user?.cc) || 0, weekly: { bought, cap, remaining: cap == null ? null : Math.max(0, cap - bought) }, maxPerPurchase: MAX_TMS_PER_PURCHASE };
   if (!enabled) return { ...base, tms: [] };
   const owned = ownedSpecies(user);
-  const tms = sellableTms().map((i) => ({
+  const tms = sellableTms(env).map((i) => {
+    const mv = getMove(i.tm.move, env) ?? i.tm; // the numbers the fight uses (Gen 9 under the full sim)
+    return {
     item: i.id,
     move: i.tm.move,
     name: i.name,
     number: i.tm.number,
-    type: i.tm.type,
-    category: i.tm.category,
-    power: i.tm.power,
-    accuracy: i.tm.accuracy,
+    type: mv.type ?? i.tm.type,
+    category: mv.category ?? i.tm.category,
+    power: mv.power || null,
+    accuracy: mv.accuracy ?? i.tm.accuracy,
     tier: i.shop.tier,
     price: discountedPrice(liveEffects(), "tms", i.shop.price.cc), // a Live event's discount
     owned: getQuantity(user, i.id),
     teaches: owned.filter((sid) => canLearnByTm(sid, i.tm.move)).length,
     description: i.description,
-  }));
+    ...moveDetails(i.tm.move, mv), // { desc, acc, priority }: what the move does (status moves need it most)
+    };
+  });
   return { ...base, tms };
 }
 
@@ -137,7 +142,7 @@ export function buyTms(user, { item, qty = 1 } = {}, { env = process.env, now = 
   if (!isTmEnabled(env)) return fail(403, "The TM shop isn't open yet.", "disabled");
   const entry = getCatalogItem(item);
   if (!entry || entry.category !== "tm") return fail(400, "Unknown TM.", "unknown_tm");
-  if (entry.status !== "active" || !entry.shop?.eligible) return fail(400, `${entry.name} isn't for sale.`, "not_for_sale");
+  if (entry.status !== "active" || !entry.shop?.eligible || !tmMoveAvailable(entry.tm.move, env)) return fail(400, `${entry.name} isn't for sale.`, "not_for_sale");
   if (!Number.isInteger(qty) || qty < 1 || qty > MAX_TMS_PER_PURCHASE) return fail(400, `Buy 1–${MAX_TMS_PER_PURCHASE} at a time.`, "bad_quantity");
 
   const cap = tmWeeklyCap(env);

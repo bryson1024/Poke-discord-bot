@@ -3,7 +3,7 @@
 // The catch announcement card: a small banner drawn at the size Discord shows
 // it (320 × 96, the width of the old embed: Discord shows an image at its own
 // size, up to about 550 wide) with the animated sprite on a tier-lit platform, name, Level, types,
-// rarity, National Pokédex number, and NEW or +EXP. Pokédex progress is
+// rarity, National Pokédex number, and NEW or the duplicate's Rare Candy. Pokédex progress is
 // private, so it lives on /daily and /pokedex instead (dexProgress.js).
 //
 // catchView() reads the player AFTER grantCatch() and takes grantCatch's
@@ -68,6 +68,7 @@ export function catchView(user, { id, variant, catchResult, trainerName }) {
     isNew: catchResult.isNew,
     isNewShiny: catchResult.isNewShiny === true,
     expGained: catchResult.expGained,
+    rareCandy: catchResult.rareCandy ?? 0,
     copies: user?.pokemon?.[id]?.[variant] ?? 1,
     dex: f.region ? regionCompletion(user, f.region) : null,
   };
@@ -132,11 +133,11 @@ export async function renderCatchCard(v, { animate = false } = {}) {
   ctx.fillText(dexNo(v.id), x, 25); // National Pokédex number
   drawPill(ctx, (TIER_NAME[v.tier] ?? "Common").toUpperCase(), right, 11, TIER[v.tier] ?? tierColor(v.tier));
 
-  // Name, shiny sparkle, then NEW or +EXP right beside the name.
+  // Name, shiny sparkle, then NEW or +1 RARE CANDY right beside the name.
   // NEW = first time in the Pokédex; NEW SHINY = its first shiny ever.
   const tag = v.isNew === true ? { text: "NEW", fill: COLOR.blue, color: "#ffffff" }
     : v.isNewShiny === true ? { text: "NEW SHINY", fill: COLOR.blue, color: "#ffffff" }
-    : v.isNew === false && v.expGained > 0 ? { text: `+${fmt(v.expGained)} EXP`, fill: "#16314f", color: COLOR.exp }
+    : v.isNew === false && v.rareCandy > 0 ? { text: `+${fmt(v.rareCandy)} RARE CANDY`, fill: "#3a1f3f", color: "#ffb3e6" }
     : null;
   const nameY = 56;
   ctx.font = font(10, 800);

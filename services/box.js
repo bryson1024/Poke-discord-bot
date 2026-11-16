@@ -23,7 +23,7 @@ import { randomBytes } from "crypto";
 import {
   expForLevel, levelForExp, floorLevel, rollCatchLevel, trainingKey,
 } from "../utils/training.js";
-import { LEVEL_CAP, DUPLICATE_LEVEL_SHARE } from "../utils/battle/tuning.js";
+import { LEVEL_CAP, rareCandyShare } from "../utils/battle/tuning.js";
 import { normalizeVariant, countKey, isSpecialVariant, specialVariant } from "../utils/specialVariants.js";
 
 export const COPY_UID_PATTERN = /^c_[A-Za-z0-9]{10}$/;
@@ -271,7 +271,7 @@ export function grantSpecial(user, key, { at = Date.now() } = {}) {
 
 /**
  * Remove one copy and everything that points at it (team slots, per-copy
- * movesets, TM record). Returns the removed record (with its TM record, if
+ * movesets and Ability choices, TM record). Returns the removed record (with its TM record, if
  * any) so a Gift can hand it on. The caller has done all the checks.
  */
 export function takeCopy(user, uid) {
@@ -284,7 +284,7 @@ export function takeCopy(user, uid) {
     if (Object.keys(user.customPokemon).length === 0) delete user.customPokemon;
   }
   for (const { field, index } of slotsHolding(user, uid)) delete user[field][index].uid;
-  for (const team of Object.values(user.movesets ?? {})) {
+  for (const team of [...Object.values(user.movesets ?? {}), ...Object.values(user.abilities ?? {})]) {
     if (team && typeof team === "object") delete team[`u:${uid}`];
   }
   syncLine(user, rec.id, variantOf(rec));
@@ -318,42 +318,43 @@ export function addCopyExp(user, uid, amount) {
   return { fromLevel, toLevel: levelForExp(rec.exp) };
 }
 
-/** EXP a Feed gives a copy at `level`: today's duplicate share of one Level. */
-export function feedExpFor(level) {
+/** EXP one Rare Candy gives a copy at `level` (its Level band's share of the next Level). */
+export function rareCandyExpFor(level) {
   if (level >= LEVEL_CAP) return 0;
-  return Math.floor((expForLevel(level + 1) - expForLevel(level)) * DUPLICATE_LEVEL_SHARE);
+  return Math.max(1, Math.floor((expForLevel(level + 1) - expForLevel(level)) * rareCandyShare(level)));
 }
 
 const fail = (code, error, extra = {}) => ({ ok: false, code, error, ...extra });
 
 /**
- * Feed copy `from` to copy `to` (same species + Variant). `from` must be on
- * no Team; a trained `from` needs the rev the player confirmed.
+ * Plan `qty` Rare Candies on copy `uid`. Each candy is
+ * worked out at the Level the copy has reached, and candies past the top
+ * Level are not used. Pure: changes nothing.
+ * @returns {{ ok: true, used, gained } | { ok: false, code, error }}
  */
-export function canFeed(user, { from, to, confirmRev = undefined }) {
-  const a = copyOf(user, from);
-  const b = copyOf(user, to);
-  if (!a || !b) return fail("unknown_copy", "That Pokémon copy no longer exists.");
-  if (from === to) return fail("bad_request", "A Pokémon can't be fed to itself.");
-  const special = [a, b].map(variantOf).find(isSpecialVariant);
-  if (special) return fail("special", `The ${specialVariant(special).name} can't be fed or fed to.`);
-  if (Number(a.id) !== Number(b.id) || variantOf(a) !== variantOf(b)) return fail("bad_request", "Only a copy of the same Pokémon and variant can be fed.");
-  if (isOnTeam(user, from)) return fail("on_team", "That Pokémon is on a team. Take it off the team first.");
-  const custom = user.customPokemon?.[from];
-  if (custom && !custom.suspended && confirmRev !== (custom.rev ?? 0)) {
-    return fail("stale_confirmation", "That Pokémon has TM-trained moves. Confirm to feed it anyway.", { protected: [{ uid: from, rev: custom.rev ?? 0, tmMoves: [...(custom.tmMoves ?? [])] }] });
+export function canUseRareCandy(user, { uid, qty = 1, have = Infinity }) {
+  const rec = copyOf(user, uid);
+  if (!rec) return fail("unknown_copy", "That Pokémon copy no longer exists.");
+  const n = Number(qty);
+  if (!Number.isInteger(n) || n < 1 || n > 1000) return fail("bad_request", "Pick how many Rare Candies to use (1 to 1,000).");
+  if (n > have) return fail("not_enough", `You only have ${Number(have).toLocaleString("en-US")} Rare Cand${have === 1 ? "y" : "ies"}.`);
+  let exp = clampExp(rec.exp);
+  if (levelForExp(exp) >= LEVEL_CAP) return fail("max_level", "That Pokémon is already at the top Level.");
+  let used = 0;
+  const cap = expForLevel(LEVEL_CAP);
+  while (used < n && exp < cap) {
+    exp = Math.min(cap, exp + rareCandyExpFor(levelForExp(exp)));
+    used++;
   }
-  const level = levelForExp(clampExp(b.exp));
-  if (level >= LEVEL_CAP) return fail("max_level", "That Pokémon is already at the top Level.");
-  return { ok: true, gain: feedExpFor(level) };
+  return { ok: true, used, gained: exp - clampExp(rec.exp) };
 }
 
-export function feedCopy(user, args) {
-  const check = canFeed(user, args);
+/** Add the planned EXP to the copy. Inventory is the caller's job. */
+export function applyRareCandy(user, args) {
+  const check = canUseRareCandy(user, args);
   if (!check.ok) return check;
-  takeCopy(user, args.from);
-  const { fromLevel, toLevel } = addCopyExp(user, args.to, check.gain);
-  return { ok: true, gained: check.gain, fromLevel, toLevel };
+  const { fromLevel, toLevel } = addCopyExp(user, args.uid, check.gained);
+  return { ok: true, used: check.used, gained: check.gained, fromLevel, toLevel };
 }
 
 // ---------------------------------------------------------- normalization / migration

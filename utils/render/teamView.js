@@ -24,6 +24,7 @@ import { displaySpeciesName } from "./names.js";
 import { megaShortName, teamMegaStatus } from "../megaDisplay.js";
 import { copyTraining } from "../../services/box.js";
 import { megaFormGate, megaBattleProfile } from "../megas.js";
+import { getFusion, fusionFieldOf, fusionFitsSlot, fusionBattleProfile, isFusionFormEnabled } from "../fusions.js";
 import { isMegaCapabilityEnabled } from "../../config/features.js";
 import { normalizeVariant, specialBattleProfile } from "../specialVariants.js";
 
@@ -46,7 +47,8 @@ export function slotView(user, member, index) {
   const { speciesId: id, variant, level } = member;
   const entry = POKEMON[id] ?? {};
   const species = getSpecies(id);
-  const profile = member.megaForm ? member.battleProfile : null;
+  const profile = member.megaForm || member.fusionForm ? member.battleProfile : null;
+  const fusion = member.fusionForm ? getFusion(member.fusionForm) : null; // Black/White Kyurem
   // A Special variant (the Squirtle Squad Leader): its catalog name and base stats, as in battle.
   const special = profile ? null : specialBattleProfile(variant);
   const types = profile ? [...profile.types] : special ? [...special.types] : species?.types ?? (entry.types ?? []).map((t) => TYPE_ID_TO_NAME[t]).filter(Boolean);
@@ -58,8 +60,9 @@ export function slotView(user, member, index) {
   return {
     slot: index + 1,
     id,
-    spriteId: profile ? member.megaForm : id,
-    mega: profile ? { formId: member.megaForm, name: profile.name, shortName: megaShortName(member.megaForm), baseName } : null,
+    spriteId: fusion ? fusion.spriteId : profile ? member.megaForm : id,
+    ...(fusion && { fusion: { formId: fusion.id, name: fusion.name, shortName: fusion.shortName } }),
+    mega: profile && !fusion ? { formId: member.megaForm, name: profile.name, shortName: megaShortName(member.megaForm), baseName } : null,
     name: profile ? profile.name : special?.name ?? baseName,
     variant,
     shiny: variant === "shiny",
@@ -132,6 +135,11 @@ export function buildShowcaseView(user, { displayName = "Trainer", trainerFile =
     if (s.mega && megaOn && megaFormGate(s.mega, "team", { env }).allowed) {
       const profile = megaBattleProfile(s.mega);
       if (profile) Object.assign(member, { megaForm: s.mega, battleProfile: profile });
+    }
+    // A fusion form: shown while enabled and still unlocked (no team rules: it never fights).
+    const form = fusionFieldOf(s);
+    if (form && isFusionFormEnabled(form, env) && fusionFitsSlot(user, { id: member.speciesId, variant: member.variant }, form)) {
+      Object.assign(member, { fusionForm: form, battleProfile: fusionBattleProfile(form), name: getFusion(form).name });
     }
     return [member];
   });

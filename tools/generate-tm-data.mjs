@@ -7,13 +7,17 @@
 //
 // Catalog (owner decisions D-T4/D-T5/D-T5b, 2026-11-10: the broad catalog
 // "R-B"; docs/tm-system in the TM audit):
-//   • LAUNCH (156): damaging moves the battle engine already models.
-//   • HOLD (16): sellable once a small engine fix lands (D-T13). Their
-//     compatibility is generated now so a fix needs no data change.
-//     (Gyro Ball and Grass Knot are also held but are not in battleData.json
-//     — power from Speed/weight — so they get no data until they are added.)
-//   • Everything else (status moves, two-turn/recharge moves, Hidden Power,
-//     Return…) is not in the catalog at all.
+//   • LAUNCH (156): damaging moves the legacy battle engine already models.
+//   • FULLSIM (118, owner 2026-11-16, price draft "TM Price Draft"): moves
+//     only Showdown's engine plays correctly: the 15 former held moves plus
+//     Gyro Ball and Grass Knot, 38 damaging moves (variable power, fixed
+//     damage, two-turn, recharge, and the three that make the user faint)
+//     and 63 status moves. Sold and usable only
+//     while FULL_SIM_ENABLED is on (utils/battle/tmData.js tmMoveAvailable);
+//     checked against data/battle/full-sim-data.json, not battleData.json.
+//   • HOLD (1): Tera Blast (no Terastal, so it would only ever be Normal).
+//   • Everything else (doubles-only moves, Hidden Power, Return, Double
+//     Team, Attract…) is not in the catalog at all.
 //
 // Compatibility rule (R-B), from Showdown learnset sources ("<gen>M" = taught
 // by TM/TR/HM in that generation):
@@ -37,6 +41,7 @@ import { Generations } from "@pkmn/data";
 const ROOT = new URL("..", import.meta.url);
 const OUT = new URL("data/battle/tm-data.json", ROOT);
 const battle = JSON.parse(fs.readFileSync(new URL("battleData.json", ROOT), "utf8"));
+const fullSim = JSON.parse(fs.readFileSync(new URL("data/battle/full-sim-data.json", ROOT), "utf8"));
 const pokemonData = JSON.parse(fs.readFileSync(new URL("pokemonData.json", ROOT), "utf8"));
 
 // Gen 5 (Black/White = Black 2/White 2) TM and HM numbers.
@@ -48,24 +53,16 @@ const LAUNCH = `dragonclaw venoshock icebeam blizzard smackdown thunderbolt thun
 dazzlinggleam disarmingvoice drainingkiss infestation mysticalfire petalblizzard playrough poweruppunch brutalswing darkestlariat highhorsepower liquidation lunge pollenpuff psychicfangs smartstrike stompingtantrum throatchop breakingswipe burningjealousy dualwingbeat expandingforce flipturn grassyglide lashout scaleshot scorchingsands skittersmack alluringvoice chillingwater icespinner pounce psychicnoise supercellslam temperflare trailblaze
 acidspray aircutter airslash assurance aurasphere avalanche blazekick bodyslam bravebird brine bugbite bugbuzz bulletseed crosspoison crunch darkpulse doubleedge dragonpulse drainpunch drillrun earthpower electroweb firefang firepunch firespin flareblitz gigadrain gunkshot headbutt heatwave hurricane hydropump hypervoice icefang icepunch iciclespear icywind ironhead irontail leafblade leechlife magicalleaf megakick megapunch megahorn metalclaw mudshot mudslap muddywater pinmissile poisontail powergem powerwhip psybeam psychocut razorshell revenge rockblast sandtomb seedbomb steelwing swift tailslap takedown thunderfang thunderpunch triattack vacuumwave waterpulse whirlpool zenheadbutt`.split(/\s+/);
 
-// Held until an engine fix (D-T13); reason shown to admins/players later.
+// Full sim only (owner 2026-11-16). Former holds first, then new damaging
+// moves, then status moves.
+const FULLSIM = `acrobatics bodypress closecombat dracometeor falseswipe foulplay frostbreath knockoff leafstorm outrage overheat psyshock superpower tripleaxel uproar gyroball grassknot
+lowkick heavyslam heatcrash electroball reversal hardpress endeavor superfang nightshade focuspunch upperhand poltergeist futuresight hex storedpower weatherball dreameater snore steelbeam meteorbeam solarbeam solarblade dig dive fly bounce phantomforce hyperbeam gigaimpact frenzyplant blastburn hydrocannon grasspledge firepledge waterpledge explosion selfdestruct mistyexplosion
+swordsdance nastyplot dragondance calmmind bulkup toxic willowisp stealthrock thunderwave protect substitute roost rest painsplit trickroom tailwind spikes toxicspikes reflect lightscreen auroraveil raindance sunnyday sandstorm snowscape grassyterrain electricterrain psychicterrain mistyterrain taunt encore agility rockpolish irondefense amnesia cosmicpower curse workup honeclaws batonpass haze
+charm screech scaryface faketears featherdance metalsound eerieimpulse confide confuseray endure sleeptalk focusenergy charge torment roar imprison spite psychup safeguard trick skillswap metronome`.split(/\s+/);
+
+// Held (not sold); reason shown to admins.
 const HOLD = {
-  psyshock: "should hit the target's Defense",
-  overheat: "user's Sp. Atk −2 after use not applied",
-  falseswipe: "must leave the target at 1 HP",
-  acrobatics: "110 power when holding no item (data has 55)",
-  frostbreath: "always lands a critical hit",
-  bodypress: "should use the user's Defense",
-  tripleaxel: "hits for 20, 40 then 60 power",
   terablast: "Terastal mechanic absent (always Normal)",
-  closecombat: "user's Defense and Sp. Def −1 not applied",
-  superpower: "user's Attack and Defense −1 not applied",
-  dracometeor: "user's Sp. Atk −2 not applied",
-  leafstorm: "user's Sp. Atk −2 not applied",
-  outrage: "2–3 turn lock-in and confusion not modeled",
-  uproar: "3-turn lock-in not modeled",
-  foulplay: "should use the target's Attack",
-  knockoff: "battle data keeps the Gen 5 power 20 (Gen 6+: 65)",
 };
 
 const G = new Generations(Dex);
@@ -73,9 +70,11 @@ const GEN = Object.fromEntries([5, 6, 7, 8, 9].map((n) => [n, G.get(n)]));
 const baseName = (num) => Dex.species.all().find((x) => x.num === num && !x.forme)?.name;
 
 const problems = [];
-const moveIds = [...LAUNCH, ...Object.keys(HOLD)];
+const moveIds = [...LAUNCH, ...FULLSIM, ...Object.keys(HOLD)];
+const FULL = new Set(FULLSIM);
 if (new Set(moveIds).size !== moveIds.length) problems.push("a move is listed twice");
-for (const id of moveIds) if (!battle.moves[id]) problems.push(`not in battleData.json: ${id}`);
+for (const id of [...LAUNCH, ...Object.keys(HOLD)]) if (!battle.moves[id]) problems.push(`not in battleData.json: ${id}`);
+for (const id of FULLSIM) if (!fullSim.moves[id]) problems.push(`not in full-sim-data.json: ${id}`);
 
 // Learnsets per species from its latest game.
 const species = Object.keys(pokemonData).map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 1025).sort((a, b) => a - b);
@@ -98,7 +97,7 @@ const moves = {};
 for (const id of moveIds) {
   const learners = species.filter((n) => learns(n, id));
   moves[id] = {
-    status: HOLD[id] ? "hold" : "launch",
+    status: HOLD[id] ? "hold" : FULL.has(id) ? "fullsim" : "launch",
     ...(HOLD[id] && { holdReason: HOLD[id] }),
     tm: GEN5_NUMBER[id] ?? null,
     rule: GEN5_NUMBER[id] ? "gen5" : "modern",
@@ -110,10 +109,10 @@ for (const id of moveIds) {
 const out = {
   note: "TM compatibility (generated by tools/generate-tm-data.mjs from @pkmn/dex 0.10.12; do not edit). battleData.json is unchanged.",
   rule: "Gen 5 TM moves: #1-649 by Gen 5 machine, #650+ by machine in their latest game. Other moves: by machine in the species' latest game that has it (Gen 9-6).",
-  counts: { launch: LAUNCH.length, hold: Object.keys(HOLD).length, species: species.length },
+  counts: { launch: LAUNCH.length, fullsim: FULLSIM.length, hold: Object.keys(HOLD).length, species: species.length },
   moves: Object.fromEntries(Object.entries(moves).sort(([a], [b]) => a.localeCompare(b))),
 };
 const json = JSON.stringify(out, null, 1).replace(/\[\n\s+([\d,\n\s]+?)\n\s+\]/g, (_, body) => `[${body.replace(/\s+/g, "")}]`);
 fs.writeFileSync(OUT, json + "\n");
 const pairs = Object.values(moves).reduce((t, m) => t + m.species.length, 0);
-console.log(`tm-data: ${LAUNCH.length} launch + ${Object.keys(HOLD).length} hold moves, ${pairs} species-move pairs, ${json.length} bytes`);
+console.log(`tm-data: ${LAUNCH.length} launch + ${FULLSIM.length} full-sim + ${Object.keys(HOLD).length} hold moves, ${pairs} species-move pairs, ${json.length} bytes`);

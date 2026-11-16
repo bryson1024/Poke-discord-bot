@@ -29,6 +29,9 @@ let showOwnedOnly = false;
 let showUnownedOnly = false;
 let regionFilter = ""; // "" = every live region
 let shinyOnly = false;
+// Filters, sort and mode survive a trip to another page (this browser tab only).
+const view = viewState("collection", { q: "", tier: "", type: "", sort: "dex", extra: "", region: "", shiny: false });
+let lastCount = null; // { shown, total } from the last box render
 let regions = []; // [{ name, ids }], built once from pokemonData in init()
 // Multi-select (Donate mode). In-memory only; a reload resets it, and the
 // pageshow handler below resets it on a back/forward cache restore.
@@ -37,7 +40,8 @@ const multiSelected = new Set(); // Pokémon IDs
 // The box tile the player tapped (docs/adr/0001): preselected in "Which one?".
 let pendingCopyUid = null;
 
-import { rarityEmojis, SPECIAL_NAMES, specialSprite, rowVariant } from "/public/spriteconfig.js";
+import "/public/shared/powerInfo.js"; // the ⓘ "What is Power?" buttons
+import { rarityEmojis, SPECIAL_NAMES, specialSprite, rowVariant, variantKey } from "/public/spriteconfig.js";
 import { getNextMondayUTC, formatCountdown } from "/public/weeklyReset.js";
 import { getRegions, countOwned, countRegistered } from "/public/picker-pokemon/regions.js";
 import * as bulkRules from "/public/picker-pokemon/bulkRules.js";
@@ -45,6 +49,7 @@ import { showMessage, showActionError, showExpired, showBanner, toast, EXPIRED_M
 import { displaySpeciesName, nameMatches } from "/public/shared/names.js";
 import { scanFx } from "/public/shared/spriteFx.js";
 import { openDetail } from "/public/picker-pokemon/detail.js";
+import { viewState, debounce } from "/public/shared/viewState.js";
 import { mountCopyChoice, copiesOf, teamNames } from "/public/picker-pokemon/copyChoice.js";
 import { GYM_BADGES, earnedBadgeKeys } from "/public/picker-pokemon/badges.js";
 
@@ -139,9 +144,11 @@ function tierOf(p) {
 
 // Released generations (GET /api/pokedex-status). Defaults to Gens 1–5.
 let releasedGenerations = new Set([1, 2, 3, 4, 5]);
+// Started by init() together with the other loads (one round trip, not three in a row).
+let pokedexStatusP = null;
 async function limitToReleasedGenerations(data, owned) {
   try {
-    const res = await fetch("/api/pokedex-status", { credentials: "same-origin" });
+    const res = await (pokedexStatusP ?? fetch("/api/pokedex-status", { credentials: "same-origin" }));
     if (res.ok) {
       const body = await res.json();
       if (Array.isArray(body.liveGenerations)) releasedGenerations = new Set(body.liveGenerations.map(Number));
@@ -469,6 +476,7 @@ function updateDustTimer() {
 function updateHUD() {
   const stones = userData.items?.evolution_stone ?? 0;
   const dust = userData.items?.shiny_dust ?? 0;
+  const candy = userData.items?.rare_candy ?? 0;
   const cc = userData.cc ?? 0;
   const tp = userData.tp ?? 0;
   const rank = getRankFromTP(tp);
@@ -481,6 +489,8 @@ function updateHUD() {
 
   if (stoneEl) stoneEl.textContent = stones;
   if (dustEl) dustEl.textContent = dust;
+  const candyEl = document.getElementById("candyCount");
+  if (candyEl) candyEl.textContent = Number(candy).toLocaleString("en-US");
   if (ccEl) ccEl.textContent = Number(cc).toLocaleString("en-US");
   if (tpEl) tpEl.textContent = Number(tp).toLocaleString("en-US");
   if (rankEl) rankEl.textContent = rank;
@@ -566,6 +576,7 @@ function initCollectionFilters() {
       host.innerHTML = chip("", "All", "") + regions.map((r) => chip(r.name, r.name, `${countRegistered(r, userData.pokedex)}/${r.ids.length}`)).join("");
     };
     draw();
+    redrawRegionChips = draw;
     host.addEventListener("click", (e) => {
       const b = e.target.closest("[data-region]");
       if (!b) return;
@@ -577,9 +588,12 @@ function initCollectionFilters() {
   const shinyBtn = document.getElementById("shinyOnlyToggle");
   shinyBtn?.addEventListener("click", () => {
     shinyOnly = !shinyOnly;
-    shinyBtn.setAttribute("aria-pressed", String(shinyOnly));
-    shinyBtn.classList.toggle("active", shinyOnly);
+    syncShinyButton();
     renderPokemonGrid();
+  });
+  document.getElementById("activeFilters")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-clear]");
+    if (b) clearFilter(b.dataset.clear);
   });
 }
 
@@ -732,13 +746,76 @@ const bestLevel = (id) => bestOwned(userData.levels, id);
 // Power = six-stat total at Level, computed by the server with the same
 // functions as /showteam's Team Power (GET /api/user-pokemon `powers`).
 const bestPower = (id) => bestOwned(userData.powers, id);
-const SORT_KEYS = { level: bestLevel, power: bestPower };
+// Power at Lv 50: what Ranked and wager battles use (GET /api/user-pokemon `powers50`, one per species).
+const power50 = (id) => (ownedCounts(id).any > 0 ? userData.powers50?.[id] ?? null : null);
+const SORT_KEYS = { level: bestLevel, power: bestPower, power50 };
 
 // Renders the grid, then the shiny backdrops (the Discord cards' motes + stars).
 function renderPokemonGrid() {
+  lastCount = null;
   renderPokemonGridCards();
   const grid = document.getElementById("pokemonGrid");
   if (grid) scanFx(grid);
+  renderActiveFilters();
+  rememberView();
+}
+
+// ---------- active filters: what is applied, one tap to undo each ----------
+const FILTER_CONTROLS = [
+  ["search", "q"], ["rarityFilter", "tier"], ["typeFilter", "type"], ["sortOrder", "sort"], ["extraFilter", "extra"],
+];
+const optionText = (id) => { const el = document.getElementById(id); return el?.selectedOptions?.[0]?.textContent?.trim() ?? ""; };
+function rememberView() {
+  const v = Object.fromEntries(FILTER_CONTROLS.map(([id, k]) => [k, document.getElementById(id)?.value ?? ""]));
+  view.set({ ...v, region: regionFilter, shiny: shinyOnly }); // never the mode: coming back in Donate mode would surprise
+}
+function renderActiveFilters() {
+  const host = document.getElementById("activeFilters");
+  if (!host) return;
+  const val = (id) => document.getElementById(id)?.value ?? "";
+  const chips = [];
+  if (val("search").trim()) chips.push(["search", `"${val("search").trim()}"`]);
+  if (val("rarityFilter")) chips.push(["rarityFilter", optionText("rarityFilter")]);
+  if (val("typeFilter")) chips.push(["typeFilter", optionText("typeFilter")]);
+  if (val("extraFilter")) chips.push(["extraFilter", optionText("extraFilter")]);
+  if (regionFilter) chips.push(["region", regionFilter]);
+  if (shinyOnly) chips.push(["shiny", "Shiny only"]);
+  if (val("sortOrder") !== "dex") chips.push(["sortOrder", optionText("sortOrder")]);
+  const count = lastCount ? `Showing ${lastCount.shown.toLocaleString("en-US")} of ${lastCount.total.toLocaleString("en-US")}` : "";
+  host.hidden = !chips.length && !count;
+  host.innerHTML = `${count ? `<span class="af-count" aria-live="polite">${count}</span>` : ""}${chips.map(([k, label]) =>
+    `<button type="button" class="af-chip" data-clear="${k}" aria-label="Remove filter: ${escAttr(label)}">${escAttr(label)} <span aria-hidden="true">✕</span></button>`).join("")}${chips.length > 1 ? `<button type="button" class="af-clear" data-clear="all">Clear all</button>` : ""}`;
+}
+const escAttr = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function clearFilter(k) {
+  const reset = (id, v = "") => { const el = document.getElementById(id); if (el) el.value = v; };
+  if (k === "all" || k === "search") reset("search");
+  if (k === "all" || k === "rarityFilter") reset("rarityFilter");
+  if (k === "all" || k === "typeFilter") reset("typeFilter");
+  if (k === "all" || k === "extraFilter") reset("extraFilter");
+  if (k === "all" || k === "sortOrder") reset("sortOrder", "dex");
+  if (k === "all" || k === "region") { regionFilter = ""; redrawRegionChips?.(); }
+  if (k === "all" || k === "shiny") { shinyOnly = false; syncShinyButton(); }
+  renderPokemonGrid();
+}
+function syncShinyButton() {
+  const b = document.getElementById("shinyOnlyToggle");
+  b?.setAttribute("aria-pressed", String(shinyOnly));
+  b?.classList.toggle("active", shinyOnly);
+}
+let redrawRegionChips = null;
+/** Saved filters back into the controls (before the first render). */
+function restoreView() {
+  const v = view.get();
+  for (const [id, k] of FILTER_CONTROLS) {
+    const el = document.getElementById(id);
+    if (!el || typeof v[k] !== "string") continue;
+    el.value = v[k];
+    if (el.tagName === "SELECT" && el.value !== v[k]) el.value = el.options[0]?.value ?? ""; // an option that no longer exists
+  }
+  if (regions.some((r) => r.name === v.region)) regionFilter = v.region;
+  shinyOnly = !!v.shiny;
+  syncShinyButton();
 }
 
 // ===========================================================
@@ -747,10 +824,12 @@ function renderPokemonGrid() {
 // current mode's action with that copy preselected in "Which one?".
 // ===========================================================
 const boxRows = () => (Array.isArray(userData.copies) ? userData.copies : []);
+// A tile copy's own name: the Squirtle Squad Leader's, else its species'.
+const copyName = (c) => (c.special ? SPECIAL_NAMES[c.special] ?? c.p.name : c.p.name);
 
 function boxTileLocked(c, tier) {
-  // A Special copy (the Squirtle Squad Leader) is kept for good: no donating, feeding, evolving or shiny craft.
-  if (c.special && currentMode !== "browse") return true;
+  // A Special copy (the Squirtle Squad Leader) is kept for good: no donating, evolving or shiny craft. Rare Candy only adds EXP, so it can have that.
+  if (c.special && currentMode !== "browse" && currentMode !== "candy") return true;
   if (currentMode === "evolve") return !isEvolutionEligibleAnyVariant(c.id);
   if (currentMode === "donate") return c.teams > 0;
   if (currentMode === "convert") {
@@ -758,7 +837,7 @@ function boxTileLocked(c, tier) {
     // Converting needs Dust, a normal copy, and no shiny of it owned yet (same rule as before).
     return c.shiny || cost <= 0 || (userData.items?.shiny_dust ?? 0) < cost || ownedCounts(c.id).shiny > 0;
   }
-  if (currentMode === "feed") return boxRows().filter((r) => r[1] === c.id && rowVariant(r) === (c.shiny ? "shiny" : "normal")).length < 2;
+  if (currentMode === "candy") return (userData.items?.rare_candy ?? 0) < 1 || c.level >= CANDY_LEVEL_CAP;
   return false;
 }
 
@@ -767,9 +846,12 @@ function renderBoxTiles(container) {
   const rarityFilter = (document.getElementById("rarityFilter")?.value || "").toLowerCase();
   const typeFilter = (document.getElementById("typeFilter")?.value || "").toLowerCase();
   const sortOrder = document.getElementById("sortOrder")?.value || "dex";
+  const extra = document.getElementById("extraFilter")?.value || "";
+  const lineCount = new Map();
+  if (extra === "dupes") for (const r of boxRows()) lineCount.set(`${r[1]}:${rowVariant(r)}`, (lineCount.get(`${r[1]}:${rowVariant(r)}`) ?? 0) + 1);
 
   const tiles = [];
-  for (const [uid, id, shiny, level, at, trained, teams, , special] of boxRows()) {
+  for (const [uid, id, shiny, level, at, trained, teams, exp, special] of boxRows()) {
     const p = pokemonData[id];
     if (!p) continue;
     const tier = tierOf(p);
@@ -778,17 +860,27 @@ function renderBoxTiles(container) {
     if (typeFilter && !(p.types ?? []).map((t) => TYPE_MAP[t]).includes(typeFilter)) continue;
     if (regionFilter && p.region !== regionFilter) continue;
     if (shinyOnly && !shiny) continue;
-    tiles.push({ uid, id, shiny: !!shiny, level, at, trained: !!trained, teams, p, tier, special: special ?? null });
+    if (extra === "team" && !teams) continue;
+    if (extra === "free" && teams) continue;
+    if (extra === "trained" && !trained) continue;
+    if (extra === "evolve" && !isEvolutionEligibleAnyVariant(id)) continue;
+    if (extra === "dupes" && (lineCount.get(`${id}:${special ?? (shiny ? "shiny" : "normal")}`) ?? 0) < 2) continue;
+    tiles.push({ uid, id, shiny: !!shiny, level, at, trained: !!trained, teams, exp: Number(exp) || 0, p, tier, special: special ?? null });
   }
+  lastCount = { shown: tiles.length, total: boxRows().length };
 
   const byDex = (a, b) => a.id - b.id || b.level - a.level || a.uid.localeCompare(b.uid);
+  const copyPower = (c) => userData.copyPowers?.[c.uid] ?? 0;
   const sorts = {
     "level-desc": (a, b) => b.level - a.level || byDex(a, b),
     "level-asc": (a, b) => a.level - b.level || byDex(a, b),
     newest: (a, b) => (b.at || 0) - (a.at || 0) || byDex(a, b),
     name: (a, b) => String(a.p.name).localeCompare(String(b.p.name)) || byDex(a, b),
-    "power-desc": (a, b) => (bestPower(b.id) ?? 0) - (bestPower(a.id) ?? 0) || byDex(a, b),
-    "power-asc": (a, b) => (bestPower(a.id) ?? 0) - (bestPower(b.id) ?? 0) || byDex(a, b),
+    // Each copy's own Power at its own Level (`copyPowers`), not the line's best.
+    "power-desc": (a, b) => copyPower(b) - copyPower(a) || byDex(a, b),
+    "power-asc": (a, b) => copyPower(a) - copyPower(b) || byDex(a, b),
+    // Ranked: every copy of a species ties at Lv 50; the higher real Level first (it knows more moves).
+    "power50-desc": (a, b) => (userData.powers50?.[b.id] ?? 0) - (userData.powers50?.[a.id] ?? 0) || b.level - a.level || byDex(a, b),
   };
   tiles.sort(sorts[sortOrder] ?? byDex);
 
@@ -822,6 +914,8 @@ function renderBoxTiles(container) {
       <div class="dex-no">#${String(c.id).padStart(4, "0")}</div>
       <div class="pokemon-name">${c.shiny ? "✨ " : ""}${name}</div>
       <div class="poke-levels"><span class="poke-level${c.shiny ? " shiny" : ""}">Lv ${c.level}</span></div>
+      ${sortOrder.startsWith("power50") ? `<div class="poke-power" title="Power at Lv 50: Ranked and wager battles set every Pokémon to Lv 50">Lv 50 <b>${(userData.powers50?.[c.id] ?? 0).toLocaleString("en-US")}</b></div>`
+        : sortOrder.startsWith("power") ? `<div class="poke-power" title="Power: total of all six stats at this copy's Level">Power <b>${copyPower(c).toLocaleString("en-US")}</b></div>` : ""}
       <div class="pokemon-tier"><span class="cc-tier" data-tier="${c.tier}">${capitalize(c.tier)}</span></div>`;
     const states = [`Level ${c.level}`];
     if (c.shiny) states.push("shiny");
@@ -865,73 +959,123 @@ function onBoxTileClick(c, locked) {
   pendingCopyUid = c.uid;
   viewVariant.set(c.id, c.shiny ? "shiny" : "normal");
   if (locked) {
-    if (c.special) {
-      const name = SPECIAL_NAMES[c.special] ?? c.p.name;
-      return showMessage({ title: "Kept for good", message: `The ${name} is kept for good: it can't be donated, fed, evolved or made shiny.` });
+    if (c.special && currentMode !== "candy") {
+      return showMessage({ title: "Kept for good", message: `The ${copyName(c)} is kept for good: it can't be donated, evolved or made shiny.` });
     }
-    if (currentMode === "donate" || currentMode === "feed") {
-      const msg = currentMode === "feed" && !c.teams
-        ? `You need another ${c.shiny ? "shiny " : ""}${c.p.name} to feed this one.`
-        : `This ${c.p.name} is on your ${teamNames(c.teams).join(" and ")} team. Take it off the team on the Teams page first.`;
+    if (currentMode === "candy") {
+      const msg = c.level >= CANDY_LEVEL_CAP
+        ? `${copyName(c)} is already at Lv ${CANDY_LEVEL_CAP}.`
+        : "You don't have any Rare Candy. Catch a Pokémon you already have, claim /daily or the Weekly Pack, or keep chatting to find some.";
+      return showMessage({ title: "Not available", message: msg });
+    }
+    if (currentMode === "donate") {
+      const msg = `This ${c.p.name} is on your ${teamNames(c.teams).join(" and ")} team. Take it off the team on the Teams page first.`;
       return showMessage({ title: "Not available", message: msg });
     }
     return showBlockedActionModal(c.id);
   }
-  if (currentMode === "browse") return openDetail(c.id, detailContext(), c.special ? { variant: c.special } : {});
+  // This copy's details: its Level, stats and equipped moves on each team.
+  if (currentMode === "browse") return openDetail(c.id, detailContext(), { variant: c.special ?? (c.shiny ? "shiny" : "normal"), uid: c.uid });
   if (currentMode === "evolve") return openEvolutionModal(c.id);
   if (currentMode === "donate") return openDonationConfirmModal(c.id, c.shiny ? "shiny" : "normal");
   if (currentMode === "convert") return openConvertModal(c.id);
-  if (currentMode === "feed") return openFeedModal(c);
+  if (currentMode === "candy") return openCandyModal(c);
 }
 
-// 🍖 Feed: another copy of the same Pokémon + Variant gives this one EXP
-// and is used up (POST /api/pokemon/feed). The fed copy can't be on a team.
-function openFeedModal(target) {
+// 🍬 Rare Candy: each candy gives this copy its Level band's share of the EXP
+// it needs for its next Level (POST /api/pokemon/rare-candy). Must match
+// RARE_CANDY_LEVEL_BANDS in utils/battle/tuning.js; the server decides.
+const CANDY_LEVEL_CAP = 100;
+const CANDY_BANDS = [[80, 0.125], [50, 0.25], [30, 0.5], [1, 1]];
+const candyShare = (lv) => CANDY_BANDS.find(([from]) => lv >= from)?.[1] ?? 1;
+const candyExpForLevel = (lv) => (lv <= 1 ? 0 : lv ** 3);
+const candyLevelOf = (exp) => {
+  let lv = Math.max(1, Math.floor(Math.cbrt(exp)));
+  while (lv > 1 && lv ** 3 > exp) lv--;
+  while ((lv + 1) ** 3 <= exp) lv++;
+  return Math.min(CANDY_LEVEL_CAP, lv);
+};
+function candyPlan(startExp, qty) {
+  const cap = candyExpForLevel(CANDY_LEVEL_CAP);
+  let exp = Math.min(cap, startExp);
+  let used = 0;
+  while (used < qty && exp < cap) {
+    const lv = candyLevelOf(exp);
+    exp = Math.min(cap, exp + Math.max(1, Math.floor((candyExpForLevel(lv + 1) - candyExpForLevel(lv)) * candyShare(lv))));
+    used++;
+  }
+  return { used, exp, level: candyLevelOf(exp) };
+}
+
+function openCandyModal(target) {
+  const have = userData.items?.rare_candy ?? 0;
+  const startExp = Math.max(target.exp || 0, candyExpForLevel(target.level));
+  // Most candies worth offering: enough to reach the top Level, never more than owned.
+  const most = candyPlan(startExp, Math.min(have, 1000)).used;
+  const pct = Math.round(candyShare(target.level) * 1000) / 10;
   const overlay = createOverlay();
   const modal = document.createElement("div");
   modal.style.cssText = "background:var(--card);border:2px solid var(--cc-blue);border-radius:14px;padding:1.5rem;text-align:center;max-width:460px;width:92%;";
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
-  modal.setAttribute("aria-label", `Feed ${target.p.name}`);
+  modal.setAttribute("aria-label", `Give Rare Candy to ${copyName(target)}`);
   modal.innerHTML = `
-    <h2 style="margin:0 0 6px;">Feed ${target.shiny ? "✨ " : ""}${target.p.name} (Lv ${target.level})</h2>
-    <p style="margin:0;color:var(--cc-text-muted);">Give it another ${target.p.name}. The one you feed is used up and this one gains EXP. Your Pokédex keeps ${target.p.name} either way.</p>
-    <div class="cc-copyslot"></div>
+    <img src="/public/sprites/items/rare_candy.png" alt="" style="width:48px;height:48px;image-rendering:pixelated;">
+    <h2 style="margin:4px 0 6px;">Rare Candy for ${target.shiny ? "✨ " : ""}${copyName(target)} (Lv ${target.level})</h2>
+    <p style="margin:0;color:var(--cc-text-muted);">Each Rare Candy gives this Pokémon ${pct}% of the EXP it needs for its next Level at Lv ${target.level} (less from Lv 30, 50 and 80). You have ${have.toLocaleString("en-US")}.</p>
+    <label style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:14px;">
+      How many?
+      <input class="candy-qty cc-input" type="number" min="1" max="${most}" value="1" inputmode="numeric" style="width:90px;">
+      <button class="candy-max cc-btn" type="button">Max (${most.toLocaleString("en-US")})</button>
+    </label>
+    <p class="candy-preview" aria-live="polite" style="margin:10px 0 0;font-weight:700;"></p>
     <div style="display:flex;gap:10px;justify-content:center;margin-top:12px;">
       <button class="cancel-btn cc-btn" type="button">Cancel</button>
-      <button class="confirm-btn cc-btn cc-btn--primary" type="button">Feed</button>
+      <button class="confirm-btn cc-btn cc-btn--primary" type="button">Use</button>
     </div>`;
   overlay.append(modal);
+  const qtyEl = modal.querySelector(".candy-qty");
+  const previewEl = modal.querySelector(".candy-preview");
   const confirmEl = modal.querySelector(".confirm-btn");
+  const qty = () => Math.floor(Number(qtyEl.value));
+  const sync = () => {
+    const n = qty();
+    const ok = Number.isInteger(n) && n >= 1 && n <= most;
+    confirmEl.disabled = !ok;
+    if (!ok) { previewEl.textContent = `Pick 1 to ${most.toLocaleString("en-US")}.`; return; }
+    const plan = candyPlan(startExp, n);
+    previewEl.textContent = plan.level > target.level
+      ? `Lv ${target.level} → Lv ${plan.level} (+${(plan.exp - startExp).toLocaleString("en-US")} EXP)`
+      : `+${(plan.exp - startExp).toLocaleString("en-US")} EXP, still Lv ${target.level}`;
+    confirmEl.textContent = `Use ${n.toLocaleString("en-US")}`;
+  };
+  qtyEl.addEventListener("input", sync);
+  modal.querySelector(".candy-max").addEventListener("click", () => { qtyEl.value = String(most); sync(); });
   modal.querySelector(".cancel-btn").addEventListener("click", () => closeOverlay(overlay));
-  let picker = null;
-  const sync = () => { confirmEl.disabled = !picker?.get().ok; };
-  picker = mountCopyChoice(modal.querySelector(".cc-copyslot"), {
-    userData, pokeId: target.id, variant: target.shiny ? "shiny" : "normal", name: target.p.name, mode: "feed", exclude: target.uid, onChange: sync,
-  });
   sync();
+  qtyEl.focus();
   const requestId = newRequestId();
   confirmEl.addEventListener("click", () => {
-    const from = picker.get();
-    if (!from.ok) return;
+    const n = qty();
+    if (!(n >= 1 && n <= most)) return;
     withActionLock(async () => {
       confirmEl.disabled = true;
       try {
-        const res = await apiJSON("/api/pokemon/feed", {
+        const res = await apiJSON("/api/pokemon/rare-candy", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: userId, from: from.uid, to: target.uid, requestId, ...(from.rev != null ? { rev: from.rev } : {}) }),
+          body: JSON.stringify({ id: userId, uid: target.uid, qty: n, requestId }),
         });
         closeOverlay(overlay);
         const prev = userData;
         await fetchUserData();
         refreshStats(userData, prev);
         renderPokemonGrid();
-        const f = res?.fed;
-        toast(f && f.toLevel > f.fromLevel ? `${target.p.name} grew to Lv ${f.toLevel}!` : `${target.p.name} gained ${Number(f?.gained ?? 0).toLocaleString("en-US")} EXP.`);
+        const f = res?.candy;
+        toast(f && f.toLevel > f.fromLevel ? `${copyName(target)} grew to Lv ${f.toLevel}!` : `${copyName(target)} gained ${Number(f?.gained ?? 0).toLocaleString("en-US")} EXP.`);
       } catch (err) {
         confirmEl.disabled = false;
-        showActionError(err, "Couldn't feed");
+        showActionError(err, "Couldn't use Rare Candy");
       }
     });
   });
@@ -1108,8 +1252,13 @@ function renderPokemonGridCards() {
       if (owned.shiny > 0) tags.push(`<span class="poke-level shiny${viewing("shiny")}">✨ Lv ${lv("shiny")}</span>`);
       levelHTML = `<div class="poke-levels">${tags.join("")}</div>`;
       // While sorting by Power, show the number being sorted on.
-      const power = sortOrder.startsWith("power") ? bestPower(id) : null;
-      if (power != null) levelHTML += `<div class="poke-power" title="Power: total of all six stats at its Level (highest owned copy)">Power <b>${power.toLocaleString("en-US")}</b></div>`;
+      if (sortOrder.startsWith("power50")) {
+        const p50 = power50(id);
+        if (p50 != null) levelHTML += `<div class="poke-power" title="Power at Lv 50: Ranked and wager battles set every Pokémon to Lv 50">Lv 50 <b>${p50.toLocaleString("en-US")}</b></div>`;
+      } else {
+        const power = sortOrder.startsWith("power") ? bestPower(id) : null;
+        if (power != null) levelHTML += `<div class="poke-power" title="Power: total of all six stats at its Level (highest owned copy)">Power <b>${power.toLocaleString("en-US")}</b></div>`;
+      }
     }
 
     // Team badges: C = Casual team slot, R = Ranked team slot (read-only; teams are edited on the Teams page).
@@ -1386,7 +1535,9 @@ async function init() {
       return;
     }
 
-    // Load Pokemon data
+    // Load everything at once: Pokémon data, the player, released generations.
+    pokedexStatusP = fetch("/api/pokedex-status", { credentials: "same-origin" }).catch(() => null);
+    const userP = fetchUserData().then(() => null, (err) => err);
     const pokeRes = await fetch("/public/pokemonData.json", { credentials: "same-origin" });
     if (!pokeRes.ok) throw new Error("Couldn't load the Pokédex. Please refresh the page.");
     pokemonData = await pokeRes.json();
@@ -1398,9 +1549,9 @@ async function init() {
     }
 
     // Load user data (cookie session; backend will 403 if invalid)
-    try {
-      await fetchUserData();
-    } catch (err) {
+    const userErr = await userP;
+    if (userErr) {
+      const err = userErr;
       setGridMessage("");
       if (err?.status === 403) showExpired();
       else showBanner(err?.message || "Couldn't load your Pokémon. Please try again.", { title: "Couldn't load your Pokémon" });
@@ -1421,20 +1572,24 @@ async function init() {
     initStickyHUD();
     setInterval(updateDustTimer, 30_000);
     initToggles();
+    restoreView();
     initCollectionFilters();
     setMode(currentMode);
+    view.trackScroll();
+    view.restoreScroll();
     startWeeklyPackCountdown();
     initMegaUI(); // no-op unless Mega Evolution is enabled server-side
 
     // Deep link (Teams page "Open in Collection"): ?pokemon=6&variant=shiny
-    // opens that Pokémon's details on that copy.
+    // opens that Pokémon's details on that copy (variant=squad-leader: the Squirtle Squad Leader).
     const linked = Number(params.get("pokemon"));
     if (Number.isInteger(linked) && pokemonData[linked]) {
-      openDetail(linked, detailContext(), { variant: params.get("variant") === "shiny" ? "shiny" : "normal" });
+      openDetail(linked, detailContext(), { variant: variantKey(params.get("variant")), uid: params.get("copy") || null });
     }
 
     // Filters
-    document.getElementById("search")?.addEventListener("input", renderPokemonGrid);
+    document.getElementById("search")?.addEventListener("input", debounce(renderPokemonGrid, 120));
+    document.getElementById("extraFilter")?.addEventListener("change", renderPokemonGrid);
     document.getElementById("rarityFilter")?.addEventListener("change", renderPokemonGrid);
     document.getElementById("typeFilter")?.addEventListener("change", renderPokemonGrid);
     document.getElementById("sortOrder")?.addEventListener("change", renderPokemonGrid);

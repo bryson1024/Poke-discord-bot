@@ -65,8 +65,10 @@ async function tile(ctx, p, x, w, stage) {
   fillTextMid(ctx, label, x + w - 14 - pw + 14, y + 28);
   const tw = p.isNew
     ? drawTag(ctx, "NEW", x + 14, y + 14, { fill: COLOR.blue, color: "#ffffff", h: 28, size: 15 })
-    : drawTag(ctx, `+${fmt(p.expGained)} EXP`, x + 14, y + 14, { fill: "#16314f", color: COLOR.exp, h: 28, size: 15 });
-  // National Pokédex number after the NEW / +EXP tag.
+    : p.isNewShiny
+      ? drawTag(ctx, "NEW SHINY", x + 14, y + 14, { fill: COLOR.blue, color: "#ffffff", h: 28, size: 15 })
+      : drawTag(ctx, `+${fmt(p.rareCandy || 0)} RARE CANDY`, x + 14, y + 14, { fill: "#3a1f3f", color: "#ffb3e6", h: 28, size: 15 });
+  // National Pokédex number after the NEW / Rare Candy tag.
   ctx.font = font(17, 800);
   ctx.fillStyle = COLOR.textMuted;
   fillTextMid(ctx, dexNo(p.id), x + 14 + tw + 12, y + 28); // level with the tag beside it
@@ -107,7 +109,7 @@ async function reward(ctx, img, value, label, x, y) {
 }
 
 /**
- * @param v { pokemon: [catchView, catchView], cc, tp, stone, balance: { cc, tp }, rankUp: string|null, note }
+ * @param v { pokemon: [catchView, catchView], cc, tp, stone, candy, balance: { cc, tp }, rankUp: string|null, note }
  */
 export async function renderDailyCard(v, { animate = false } = {}) {
   const { w: W, h: H } = dailySize(v);
@@ -165,12 +167,13 @@ export async function renderDailyCard(v, { animate = false } = {}) {
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = "#323c5c";
   ctx.stroke();
-  const [coin, tpIcon, stone] = await Promise.all([icon("cc_coin.png"), icon("tp_icon.png"), v.stone ? icon("evolution_stone.png") : null]);
+  const [coin, tpIcon, stone, candy] = await Promise.all([icon("cc_coin.png"), icon("tp_icon.png"), v.stone ? icon("evolution_stone.png") : null, v.candy ? icon("rare_candy.png") : null]);
   let x = M + 24;
   const y = sy + 26;
   x += await reward(ctx, coin, `+${fmt(v.cc)}`, "CC", x, y);
   x += await reward(ctx, tpIcon, `+${fmt(v.tp)}`, "TP", x, y);
   if (v.stone) x += await reward(ctx, stone, "+1", "Evolution Stone", x, y);
+  if (v.candy) x += await reward(ctx, candy, `+${fmt(v.candy)}`, "Rare Candy", x, y);
 
   ctx.textAlign = "right";
   ctx.font = font(15, 800);

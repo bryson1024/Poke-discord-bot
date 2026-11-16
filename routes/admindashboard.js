@@ -171,7 +171,7 @@ export function mountAdminDashboard(app, deps) {
   const send = (res, r) => res.status(r.status).json(r.body);
   // Rank follows TP (the stored rank can lag behind until the next role sync).
   const rankOf = (u) => getRank(toNumber(u?.tp)) || BASE_RANK;
-  const copiesOf = (u) => Object.values(u?.pokemon || {}).reduce((n, e) => n + toNumber(e?.normal) + toNumber(e?.shiny), 0);
+  const pokemonCountOf = (u) => Object.values(u?.pokemon || {}).reduce((n, e) => n + toNumber(e?.normal) + toNumber(e?.shiny), 0);
 
   // ==========================================================
   // Reads
@@ -188,7 +188,7 @@ export function mountAdminDashboard(app, deps) {
       rank: rankOf(u),
       tp: toNumber(u?.tp),
       cc: toNumber(u?.cc),
-      pokemonCount: copiesOf(u),
+      pokemonCount: pokemonCountOf(u),
       speciesCount: Object.values(u?.pokemon || {}).filter((e) => toNumber(e?.normal) + toNumber(e?.shiny) > 0).length,
       trainerCount: normalizeTrainers({ trainers: u?.trainers }).length,
       lastActive: lastActiveOf(u),
@@ -242,7 +242,7 @@ export function mountAdminDashboard(app, deps) {
         pendingWager: user.pendingWager ? { stake: toNumber(user.pendingWager.stake), expiresAt: toNumber(user.pendingWager.expiresAt) } : null,
         teamSize: Array.isArray(user.displayedPokemon) ? user.displayedPokemon.length : 0,
         battleTeamSize: Array.isArray(user.battleTeam) ? user.battleTeam.length : null,
-        copies: copiesOf(user),
+        copies: pokemonCountOf(user),
       },
       pokemon,
       items,

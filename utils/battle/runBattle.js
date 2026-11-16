@@ -21,16 +21,21 @@ import { normalizeTeam } from "../teamNormalize.js";
 import { getTraining, addExp, trainingKey, speciesName } from "../training.js";
 import { getMove } from "./data.js";
 import { movesLearned } from "./moveset.js";
-import { simulateBattle } from "./sim.js";
+import { simulateLive, after } from "./simPool.js";
+import { isFullSimEnabled } from "../../config/fullSim.js";
+import { cutoverRecord, cutoverMoves } from "../../services/fullSimCutover.js";
+import { getPlan } from "../../services/battlePlans.js";
 import { teamPower, rollSurge, cuteSurgeBoost } from "./power.js";
-import { teamExp, eloUpdate, utcDay, getBattleRecord, getCasualRecord, capBlock, recordStart } from "./rewards.js";
-import { RANKED, CUTE, CAPS } from "./tuning.js";
+import { teamExp, eloUpdate, utcDay, getBattleRecord, getCasualRecord, capBlock, recordStart, canEarnDefending, recordDefended } from "./rewards.js";
+import { RANKED, CUTE, CAPS, DEFENDER_EXP_MULT } from "./tuning.js";
 import { liftRematchBlock } from "./rematch.js";
 import { wagerEligibility } from "./wager.js";
 import { teamCuteness } from "./cuteness.js";
 import { chosenMoves, keepMovesOnLevelUp } from "../../services/movesets.js";
+import { chosenAbility } from "../../services/abilities.js";
 import { resolveBattleMega } from "../../services/megaTeam.js";
 import { megaBattleEligibility, megaBattleProfile } from "../megas.js";
+import { resolveSlotFusion, fusionBattleProfile, isFusionFormEnabled, fusionFamily } from "../fusions.js";
 import { isMegaCapabilityEnabled } from "../../config/features.js";
 import { rewardsOn, rollBattleShards } from "../../services/megaShards.js";
 import { createRng } from "./rng.js";
@@ -60,6 +65,8 @@ export function withBothLocks(lockUser, idA, idB, fn) {
 // stay the base line's, so EXP, Levels and ownership never see the Mega.
 // movesetTeam: whose chosen movesets apply ("display" for casual battles and
 // displays, "battle" for ranked/wager). Members without one use automatic moves.
+// The same team's chosen Ability (services/abilities.js) rides on the member
+// as `chosenAbility`; without one the full sim picks it for the plan.
 // TM system (T1): a slot naming a customized copy (`uid`, services/ownership.js)
 // fights with that copy's moves (its TM moves included); the member carries
 // `uid`. Slots without one are built exactly as before.
@@ -74,8 +81,11 @@ export function buildTeam(user, { env = process.env, team = user.displayedPokemo
   if (mega && !mega.ok && isMegaCapabilityEnabled("battle", env)) console.warn(`⚠️ Mega slot battles as its base form (${mega.reason}).`);
   const items = battleItems(user, equipmentTeam, { env });
   // Each slot is one copy (docs/adr/0001); normalizeTeam keeps its uid.
-  return normalizeTeam(team, 6)
-    .filter((slot) => ownsVariant(user, slot.id, slot.variant))
+  const owned = normalizeTeam(team, 6).filter((slot) => ownsVariant(user, slot.id, slot.variant));
+  // The team's one Mega slot: a Mega that really battles, else the first
+  // valid fusion form (Black/White Kyurem, Dusk Mane/Dawn Wings Necrozma).
+  let megaSlotTaken = !!mega?.ok;
+  return owned
     .map((slot) => {
       const copyUid = slotBoxUid(user, slot) ?? null;
       const key = copyUid ? `u:${copyUid}` : `${slot.id}:${slot.variant}`; // held items + Mega slot
@@ -88,12 +98,31 @@ export function buildTeam(user, { env = process.env, team = user.displayedPokemo
       if (copyUid) member.copyUid = copyUid;
       const uid = slotCopyUid(user, slot) ?? null; // a trained copy (TM moves)
       if (uid) member.uid = uid;
+      // Fusion forms (utils/fusions.js, fail-closed): resolved first, so the
+      // form's own moves (Freeze Shock, Sunsteel Strike, …) count only when it
+      // really fights as that form.
+      const fusion = resolveSlotFusion(user, slot, owned, { env, megaActive: megaSlotTaken });
+      if (fusion?.ok) megaSlotTaken = true;
+      if (fusion && !fusion.ok && isFusionFormEnabled(fusion.formId, env)) console.warn(`⚠️ ${fusion.formId} battles as ${fusionFamily(fusion.formId)?.baseName} (${fusion.reason}).`);
       // The slot's own copy's moves (any copy, docs/adr/0001), else the line's.
-      const moves = chosenMoves(user, movesetTeam, slot.id, slot.variant, { uid: copyUid ?? uid });
+      const moves = chosenMoves(user, movesetTeam, slot.id, slot.variant, { uid: copyUid ?? uid, form: fusion?.ok ? fusion.formId : null });
       if (moves) member.moves = moves;
+      // Full sim: a member with no picked Moveset keeps the moves it had at cutover (services/fullSimCutover.js).
+      else if (isFullSimEnabled(env)) {
+        const record = cutoverRecord(user, slot, member.level);
+        if (record) member.moves = cutoverMoves(record, slot.id, member.level);
+      }
+      // Full sim: the Ability picked for this team (else Automatic, chosen per fight in showdown/simulate.js).
+      if (isFullSimEnabled(env)) {
+        const ability = chosenAbility(user, movesetTeam, slot.id, slot.variant, { uid: copyUid ?? uid });
+        if (ability) member.chosenAbility = ability;
+      }
       // A slot battling as a Mega never uses a regular item (its Mega Stone fills the slot).
       const item = items.get(key) ?? (copyUid ? items.get(`${slot.id}:${slot.variant}`) : undefined);
       if (item && !(mega?.ok && mega.key === key)) member.item = item;
+      // A fusion form: its stats, ability and name for this battle; Level
+      // stays the base Pokémon's (its fusion item fills the item slot: heldItems.js).
+      if (fusion?.ok) return { ...member, name: fusion.profile.name, baseName: member.name, fusionForm: fusion.formId, battleProfile: fusion.profile };
       if (!mega?.ok || mega.key !== key) return withSpecialStats(member);
       return { ...member, name: mega.profile.name, baseName: member.name, megaForm: mega.formId, battleProfile: mega.profile };
     });
@@ -116,6 +145,12 @@ function withSpecialStats(m) {
 // saved, say) fights as its base form, failing closed like buildTeam.
 export function withMegaStats(members, { env = process.env } = {}) {
   return members.map((m) => {
+    // A saved fusion form: its stats while that fusion is enabled.
+    if (m.fusionForm) {
+      if (isFusionFormEnabled(m.fusionForm, env)) return { ...m, battleProfile: fusionBattleProfile(m.fusionForm) };
+      const { fusionForm, baseName, battleProfile, ...base } = m;
+      return { ...base, name: baseName ?? base.name };
+    }
     if (!m.megaForm) return withSpecialStats(m);
     if (megaBattleEligibility(m.megaForm, { env }).battleReady) return { ...m, battleProfile: megaBattleProfile(m.megaForm) };
     const { megaForm, baseName, battleProfile, ...base } = m;
@@ -158,7 +193,10 @@ function applyExp(user, side, result, sideIndex) {
     .filter((k) => k.bySide === sideIndex)
     .map((k) => side.opponent[k.slot]);
   const surged = (m) => (side.levelMult ? { ...m, level: Math.min(100, Math.round(m.level * side.levelMult)) } : m);
-  const base = teamExp({ members: atRealLevels(side.members).map(surged), knockedOut: atRealLevels(knockedOut), won: result.winner === sideIndex });
+  // expMult (a Defender's half share) applies first; held items and events on top.
+  const mult = side.expMult ?? 1;
+  const base = teamExp({ members: atRealLevels(side.members).map(surged), knockedOut: atRealLevels(knockedOut), won: result.winner === sideIndex })
+    .map((g) => (mult === 1 ? g : Math.floor(g * mult)));
   // Lucky Egg: the holder's battle EXP × 1.5, rounded down (Gen 5+). Members
   // without an EXP item keep exactly the same gain as before.
   const gains = base.map((g, i) => Math.floor(g * expMultiplierFor(side.members[i].item)));
@@ -260,91 +298,103 @@ export function runBattle({ trainerData, challengerId, defenderId, mode, rematch
   const powers = teams.map(teamPower);
   const surge = rated ? null : rollSurge(powers, seed, teams.map(teamCuteness));
   if (surge?.cute) Object.assign(surge, cuteSurgeBoost(teams[surge.side], CUTE.margin * powers[1 - surge.side]));
-  const result = simulateBattle({ sides: teams.map((members) => ({ members })), seed: seed + 1, surge });
+  // Synchronous with the full sim off; a Promise from the sim worker with it on.
+  // Each side plays its Team's Battle plan (Casual team for casual battles, Ranked team otherwise).
+  const planTeam = mode === "open" ? "display" : "battle";
+  const sides = teams.map((members, i) => ({ members, plan: getPlan([challenger, defender][i], planTeam) }));
+  return after(simulateLive({ sides, seed: seed + 1, surge }), (result) => {
 
-  const ids = [challengerId, defenderId];
-  const users = [challenger, defender];
-  const winnerId = ids[result.winner];
-  const loserId = ids[1 - result.winner];
+    const ids = [challengerId, defenderId];
+    const users = [challenger, defender];
+    const winnerId = ids[result.winner];
+    const loserId = ids[1 - result.winner];
 
-  const exp = {};
-  const earners = mode === "wager" ? [0, 1] : overCap ? [] : [0];
-  for (const i of earners) {
-    exp[ids[i]] = applyExp(users[i], { members: teams[i], opponent: teams[1 - i], ...(surge?.cute && surge.side === i && { levelMult: surge.levelMult }) }, result, i);
-  }
+    // Both sides earn EXP. In casual and ranked battles the Defender earns
+    // DEFENDER_EXP_MULT of it, from up to CAPS.defendedPerDay battles a day; past the Challenger's
+    // Battle cap (an accepted Rematch request) neither side earns.
+    const exp = {};
+    const defenderEarns = mode === "wager" || (!overCap && canEarnDefending(records[1]));
+    if (mode !== "wager" && defenderEarns) recordDefended(records[1]);
+    const earners = overCap ? [] : defenderEarns ? [0, 1] : [0];
+    for (const i of earners) {
+      const expMult = i === 1 && mode !== "wager" ? DEFENDER_EXP_MULT : 1;
+      exp[ids[i]] = applyExp(users[i], { members: teams[i], opponent: teams[1 - i], expMult, ...(surge?.cute && surge.side === i && { levelMult: surge.levelMult }) }, result, i);
+    }
 
-  let rating = {};
-  if (rated) {
-    const from = records.map((r) => r.rating);
-    const to = eloUpdate(from[0], from[1], result.winner === 0 ? 1 : 0);
-    records.forEach((r, i) => {
-      r.rating = to[i];
-      if (i === result.winner) r.wins++;
-      else r.losses++;
-    });
-    rating = { [ids[0]]: { from: from[0], to: to[0] }, [ids[1]]: { from: from[1], to: to[1] } };
+    let rating = {};
+    if (rated) {
+      const from = records.map((r) => r.rating);
+      const to = eloUpdate(from[0], from[1], result.winner === 0 ? 1 : 0);
+      records.forEach((r, i) => {
+        r.rating = to[i];
+        if (i === result.winner) r.wins++;
+        else r.losses++;
+      });
+      rating = { [ids[0]]: { from: from[0], to: to[0] }, [ids[1]]: { from: from[1], to: to[1] } };
 
-    // Release C: battle achievements (wins, rating, levels, streaks) for both
-    // players — ranked and wager battles only (owner decision). Runs exactly
-    // once per completed battle, in the same synchronous block as
-    // wins++/losses++ and inside the caller's withBothLocks, so a streak can
-    // never move without the win/loss it belongs to. "upset" uses the
-    // pre-battle ratings.
-    users.forEach((u, i) => {
-      const won = i === result.winner;
-      trackProgress(u, [{ type: "battle", won, upset: won && from[1 - i] - from[i] >= 200 }], now.getTime());
-    });
-  } else {
-    // Casual: unrated W/L and streaks for both players, then the casual
-    // achievements (same block, inside the caller's locks).
-    users.forEach((u, i) => {
-      const c = getCasualRecord(u);
-      if (i === result.winner) {
-        c.wins++;
-        c.streak = (c.streak ?? 0) + 1;
-        if (c.streak > (c.bestStreak ?? 0)) c.bestStreak = c.streak;
-      } else {
-        c.losses++;
-        c.streak = 0;
-      }
-      trackProgress(u, [{ type: "casual" }], now.getTime());
-    });
-  }
+      // Release C: battle achievements (wins, rating, levels, streaks) for both
+      // players — ranked and wager battles only (owner decision). Runs exactly
+      // once per completed battle, in the same synchronous block as
+      // wins++/losses++ and inside the caller's withBothLocks, so a streak can
+      // never move without the win/loss it belongs to. "upset" uses the
+      // pre-battle ratings.
+      users.forEach((u, i) => {
+        const won = i === result.winner;
+        trackProgress(u, [{ type: "battle", won, upset: won && from[1 - i] - from[i] >= 200 }], now.getTime());
+      });
+    } else {
+      // Casual: unrated W/L and streaks for both players, then the casual
+      // achievements (same block, inside the caller's locks).
+      users.forEach((u, i) => {
+        const c = getCasualRecord(u);
+        if (i === result.winner) {
+          c.wins++;
+          c.streak = (c.streak ?? 0) + 1;
+          if (c.streak > (c.bestStreak ?? 0)) c.bestStreak = c.streak;
+        } else {
+          c.losses++;
+          c.streak = 0;
+        }
+        trackProgress(u, [{ type: "casual" }], now.getTime());
+      });
+    }
 
-  // Every casual battle counts against this Defender, even past the daily
-  // cap, so the 4th against them always needs a Rematch request.
-  if (!overCap) recordStart(records[0], defenderId);
-  else records[0].vs[defenderId] = (records[0].vs[defenderId] ?? 0) + 1;
-  // The Challenger battled the Defender, so the Defender may ask them for a rematch again.
-  liftRematchBlock(defender, challengerId);
-  if (mode === "wager") {
-    recordStart(records[1], challengerId);
-    trainerData[winnerId].cc = (trainerData[winnerId].cc ?? 0) + 2 * stake;
-  }
+    // Every casual battle counts against this Defender, even past the daily
+    // cap, so the 4th against them always needs a Rematch request.
+    if (!overCap) recordStart(records[0], defenderId);
+    else records[0].vs[defenderId] = (records[0].vs[defenderId] ?? 0) + 1;
+    // The Challenger battled the Defender, so the Defender may ask them for a rematch again.
+    liftRematchBlock(defender, challengerId);
+    if (mode === "wager") {
+      recordStart(records[1], challengerId);
+      trainerData[winnerId].cc = (trainerData[winnerId].cc ?? 0) + 2 * stake;
+    }
 
-  // Mega Shards: a chance for the winner, if they chose to play (the
-  // Challenger, or either side of an accepted wager). Its own seeded RNG, so
-  // the battle itself is unchanged; while the rewards switch is off nothing
-  // is rolled and the result has no megaShards key.
-  const shardResult = {};
-  if (rewardsOn(env) && !overCap && (winnerId === challengerId || mode === "wager")) {
-    shardResult.megaShards = { [winnerId]: rollBattleShards(trainerData[winnerId], { rng: createRng((seed ^ 0x5a17d) >>> 0).next, now: now.getTime(), env }) };
-  }
+    // Mega Shards: a chance for the winner, if they chose to play (the
+    // Challenger, or either side of an accepted wager). Its own seeded RNG, so
+    // the battle itself is unchanged; while the rewards switch is off nothing
+    // is rolled and the result has no megaShards key.
+    const shardResult = {};
+    if (rewardsOn(env) && !overCap && (winnerId === challengerId || mode === "wager")) {
+      shardResult.megaShards = { [winnerId]: rollBattleShards(trainerData[winnerId], { rng: createRng((seed ^ 0x5a17d) >>> 0).next, now: now.getTime(), env }) };
+    }
 
-  return {
-    ok: true,
-    seed,
-    mode,
-    stake,
-    sides: ids.map((userId, i) => ({ userId, members: teams[i], power: powers[i] })),
-    surge,
-    result,
-    winnerId,
-    loserId,
-    exp,
-    overCap, // null unless a casual battle ran past the Battle cap (an accepted rematch: "opponent" or "daily")
-    rated,
-    rating, // {} for casual battles
-    ...shardResult, // megaShards: { [winnerId]: n } only while Mega rewards are on
-  };
+    return {
+      ok: true,
+      seed,
+      mode,
+      stake,
+      // A full-sim (v2) fight's sides keep the plan they played, for the Fight record.
+      sides: ids.map((userId, i) => ({ userId, members: teams[i], power: powers[i], ...(result.v === 2 && { plan: sides[i].plan }) })),
+      surge,
+      result,
+      winnerId,
+      loserId,
+      exp,
+      overCap, // null unless a casual battle ran past the Battle cap (an accepted rematch: "opponent" or "daily")
+      rated,
+      rating, // {} for casual battles
+      ...shardResult, // megaShards: { [winnerId]: n } only while Mega rewards are on
+    };
+  });
 }

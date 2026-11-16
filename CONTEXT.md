@@ -27,7 +27,7 @@ Which version of its species a Pokémon is: normal, shiny, or a **Special varian
 _Avoid_: form, version, shiny status
 
 **Special variant**:
-A one-of-a-kind **Variant** of a species that a player wins rather than catches, such as Squirtle Squad Leader, with its own look and its own battle strength. A player holds at most one of each, and getting one registers its species in the **Pokédex** the same way a normal copy does. It is kept for good: it can't be donated, fed, gifted, evolved or crafted shiny, and it can join the **Showcase team** and **Casual team** but not the **Ranked team**.
+A one-of-a-kind **Variant** of a species that a player wins rather than catches, such as Squirtle Squad Leader, with its own look and its own battle strength. A player holds at most one of each, and getting one registers its species in the **Pokédex** the same way a normal copy does. It is kept for good: it can't be donated, gifted, evolved or crafted shiny, and it can join the **Showcase team** and **Casual team** but not the **Ranked team**.
 _Avoid_: special Pokémon, event Pokémon, form, unique Pokémon
 
 **Copy**:
@@ -70,9 +70,12 @@ _Avoid_: XP (TP is already the chat-activity points), experience points
 The **Level** a new **Copy** rolls when it is caught, set by its **Stage**, with Stage 1 legendaries and mythics rolling high. Every catch rolls one, duplicates included.
 _Avoid_: wild level, spawn level
 
-**Feed**:
-Giving up one **Copy** to add **EXP** to another copy of the same species and **Variant**. The fed copy is gone; the species stays **Registered**. A copy on a **Team** can't be fed.
-_Avoid_: merge, sacrifice, candy
+**Rare Candy**:
+A bag item that adds **EXP** to any one **Copy**: a share of the EXP that copy needs for its next **Level**, by Level band and the same for every **Tier**: a full Level below Lv 30, half from Lv 30, a quarter from Lv 50, an eighth from Lv 80. A **Duplicate catch** gives one, every `/daily` gives two, the Weekly Pack carries ten, and chatting can find one. Admins can grant it; no shop sells it. A copy on a **Team** can take it.
+_Avoid_: feed, merge, sacrifice
+
+**Duplicate catch**:
+A catch of a species and **Variant** already **Registered** in the **Pokédex**. It still adds a **Copy** with its own **Catch level**, and also gives one **Rare Candy**. A first shiny is NEW SHINY, not a duplicate.
 
 ### Trainer
 
@@ -101,8 +104,28 @@ The animated background an owned Epic, Legendary or Mythic trainer sprite brings
 _Avoid_: glow, trainer background
 
 **Moveset**:
-The up to 4 moves a player picks for one Pokémon on one **Team**, from the moves it has learned by its real **Level**. A Pokémon with none picked uses the last four moves it learned.
+The up to 4 moves a player picks for one Pokémon on one **Team**, from the moves it has learned by its real **Level** or from a **TM**. A Pokémon with none picked uses the last four attacks it learned.
 _Avoid_: move set, loadout
+
+**Held item**:
+An item a player unlocks for good and gives one Pokémon on the **Casual team** or **Ranked team** to hold in battle. Holding it uses nothing up, and one unlock can be held by one Pokémon per **Team**.
+_Avoid_: equipment, gear, battle item
+
+**Battle plan**:
+The strategy a player sets for the **Casual team** or **Ranked team**, such as All-out attack or Trick Room, that decides how that **Team** plays its moves once a fight starts. It suggests **Moveset** changes that suit it but never makes them; only the player does. Computer-run opponents have one too, and theirs does pick their moves. The **Showcase team** has none.
+_Avoid_: strategy, tactic, game plan, playstyle, AI mode
+
+**Ability**:
+A Pokémon's built-in battle trait, such as Levitate or Swift Swim. Each **Team** keeps its own choice per Pokémon copy, like its Moveset: **Automatic** (the default) fights with whichever of its species' regular abilities best suits the **Team's** **Battle plan**, chosen fresh for each fight; or the player picks one of its regular abilities. A **Mega form** always has its own. Hidden abilities are never used or offered.
+_Avoid_: trait, passive, skill
+
+**Status condition**:
+One of the six major statuses a battling Pokémon can have: burned, poisoned, badly poisoned, paralyzed, asleep, or frozen. It stays through switching out.
+_Avoid_: ailment, status effect
+
+**Stat change**:
+A battling Pokémon's temporary raise or drop to one stat, from −6 to +6, that ends when it leaves the field.
+_Avoid_: stat stage, stage, stat boost (that's the hidden boost Challenge opponents get), buff
 
 **Region**:
 A named set of Pokémon that share a home region: Kanto, Johto, Hoenn, Sinnoh, Unova, Kalos, Alola, Galar, or Paldea. The game's Pokémon data puts every Pokémon in exactly one region, by National Dex number: the Hisui-introduced species #899–905 belong to Galar, and alternate forms (Galarian Meowth, Mega Charizard…) count toward their base species, never as extra Pokémon. Kalos, Alola, Galar and Paldea only appear once their generation is released.
@@ -211,7 +234,7 @@ A numbered period of ranked play. A new **Season** starts every player's **Ranke
 _Avoid_: ladder reset, split
 
 **Battle cap**:
-The limit on how many **Battles** a player may start per UTC day, across all three kinds together and against any one **Defender**. Past either limit, **Ranked battles** and **Wager battles** can't start. Past the daily limit, a **Casual battle** still runs but earns no rewards. Past the per-**Defender** limit, it needs a **Rematch request** first.
+The limit on how many **Battles** a player may start per UTC day, across all three kinds together and against any one **Defender**. Past either limit, **Ranked battles** and **Wager battles** can't start. Past the daily limit, a **Casual battle** still runs but earns no rewards. Past the per-**Defender** limit, it needs a **Rematch request** first. Being challenged never uses a **Defender's** own **Battle cap**; a **Defender** earns half EXP from up to 10 **Casual** and **Ranked battles** a UTC day, and none from a **Rematch request**.
 _Avoid_: stamina, energy, battle limit
 
 **Power rating**:
@@ -280,6 +303,10 @@ _Avoid_: match, match history entry, battle record (that is a player's W/L and r
 The dashboard page where a player sees their own **Fight records** and replays them. Only its owner can see it.
 _Avoid_: match history, battle history
 
+**Battle page**:
+The dashboard page where a player starts a **Casual battle**, a **Ranked battle** or a **Challenge**, as they would with `/battle` or `/challenge`. The fight is posted to Discord as if the command had been used. It holds **Challenges** too, though a **Challenge** is not a **Battle**. **Wager battles** and **Rematch requests** start only from `/battle`.
+_Avoid_: arena, fight page, battle hub
+
 ### Mega Evolution
 
 **Mega form**:
@@ -289,6 +316,10 @@ _Avoid_: Mega species, Mega Pokémon (as something caught)
 **Mega Stone**:
 The item that unlocks one **Mega form** on one species + **Variant**, used up when it does.
 _Avoid_: Key Stone, mega item
+
+**Mega Shard**:
+The item a player collects and trades in, many at a time, for a **Mega Stone** of their choice.
+_Avoid_: Mega fragment, stone shard
 
 ### Achievements
 
@@ -325,6 +356,6 @@ _Avoid_: trophy, quest
 > **Dev:** What if I want CC on the line?
 > **Domain expert:** Then it's a **Wager battle**, which plays by the ranked rules with a **Stake** on top. They have to accept first, it uses one of each player's **Battle cap**, and both of you earn EXP.
 > **Dev:** I caught a second Charmander — does it get its own **Level**?
-> **Domain expert:** Yes. It's a separate Pokémon in your **Collection** with its own **Catch level**. If you'd rather make your first one stronger, **Feed** the new one to it.
+> **Domain expert:** Yes. It's a separate Pokémon in your **Collection** with its own **Catch level**. You also got a **Rare Candy** for the duplicate, which you can use to make either one stronger.
 > **Dev:** And if I donate both Charmanders?
 > **Domain expert:** Your **Collection** has no Charmander, but it stays **Registered** in your **Pokédex**, so your Kanto **Pokédex completion** doesn't drop.

@@ -24,6 +24,8 @@
 import { toTeamObj } from "../utils/economyRules.js";
 import { getSpeciesEntry } from "../utils/speciesCatalog.js";
 import { megaFieldOf, megaFitsSlot, prepareTeamSelection } from "./megaTeam.js";
+import { storedFusion } from "./fusionTeam.js";
+import { isFusedSlot, getFusion } from "../utils/fusions.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
 import { addNotice, NOTICE_KINDS } from "./notices.js";
 import { ownsVariant } from "./box.js";
@@ -32,6 +34,8 @@ import { normalizeVariant, isSpecialVariant, specialVariant } from "../utils/spe
 export const BATTLE_TEAM_MAX_MYTHIC = 1;
 
 export const isMythicTier = (id) => String(getSpeciesEntry(id)?.tier ?? "").toLowerCase() === "mythic";
+/** A team slot counts as mythic-tier: its species is, or it uses a fusion form (Mega-level stat totals, utils/fusions.js). */
+export const isMythicSlot = (s) => isMythicTier(s?.id) || isFusedSlot(s);
 const speciesName = (id) => getSpeciesEntry(id)?.name ?? `#${id}`;
 
 /** True when the player has ever set (or been given) a Battle team. */
@@ -42,7 +46,7 @@ export const hasBattleTeam = (user) => Array.isArray(user?.battleTeam);
  * Display team: legacy numbers → objects, variant normalized, a valid Mega
  * kept, slots whose exact variant isn't owned removed. Returns a new array.
  */
-export function cleanStoredTeam(user, raw) {
+export function cleanStoredTeam(user, raw, teamLabel = "Ranked") {
   let team = Array.isArray(raw) ? raw : [];
   if (team.length && typeof team[0] !== "object") {
     team = team.map((pid) => ({ id: Number(pid), variant: "normal" })).filter((t) => Number.isInteger(t.id));
@@ -52,7 +56,9 @@ export function cleanStoredTeam(user, raw) {
       const slot = { id: Number(t?.id), variant: normalizeVariant(t?.variant) };
       const mega = megaFieldOf(t);
       const uid = slotBoxUid(user, { ...slot, uid: t?.uid }) ?? slotCopyUid(user, { ...slot, uid: t?.uid }); // the slot's copy (docs/adr/0001)
-      const out = mega && Number.isInteger(slot.id) && megaFitsSlot(user, slot, mega) ? { ...slot, mega } : slot;
+      let out = mega && Number.isInteger(slot.id) && megaFitsSlot(user, slot, mega) ? { ...slot, mega } : slot;
+      const form = storedFusion(user, slot, t, teamLabel); // Black/White Kyurem, while unlocked
+      if (form) out = { ...out, form };
       return uid ? { ...out, uid } : out;
     })
     .filter((t) => Number.isInteger(t.id))
@@ -84,7 +90,7 @@ export function trimBattleTeamMythics(user, now = Date.now()) {
   let kept = null;
   const removed = [];
   user.battleTeam = user.battleTeam.filter((s) => {
-    if (!isMythicTier(s.id)) return true;
+    if (!isMythicSlot(s)) return true;
     if (kept == null) { kept = s; return true; }
     removed.push(s);
     return false;
@@ -122,9 +128,9 @@ export function prepareBattleTeamSelection(user, rawTeam, opts = {}) {
   if (!prepared.ok) return prepared;
   const special = prepared.team.find((s) => isSpecialVariant(s.variant));
   if (special) return { ok: false, status: 400, code: "special_ranked", error: `The ${specialVariant(special.variant).name} can't join the Ranked team.` };
-  const mythics = prepared.team.filter((s) => isMythicTier(s.id));
+  const mythics = prepared.team.filter(isMythicSlot);
   if (mythics.length > BATTLE_TEAM_MAX_MYTHIC) {
-    const names = mythics.map((s) => speciesName(s.id)).join(", ");
+    const names = mythics.map((s) => getFusion(s.form)?.name ?? speciesName(s.id)).join(", "); // a fused slot by its form name
     return {
       ok: false,
       status: 400,

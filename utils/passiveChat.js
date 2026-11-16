@@ -12,6 +12,7 @@
 
 import { liveEffects } from "../services/liveEvents.js";
 import { scaleEarned } from "./liveEventRules.js";
+import { grantItem } from "../services/inventory.js";
 
 /**
  * @param {object} deps
@@ -19,7 +20,7 @@ import { scaleEarned } from "./liveEventRules.js";
  * @param {() => object} deps.getTrainerData - live trainerData map
  * @param {(id: string, user: object) => object} deps.normalizeUserSchema
  * @param {Map<string, number>} deps.cooldowns - per-user last-rewarded message time
- * @param {{ cooldownMs: number, tpGain: number, ccChance: number, ccGain: number }} deps.config
+ * @param {{ cooldownMs: number, tpGain: number, ccChance: number, ccGain: number, candyChance?: number }} deps.config
  * @param {(data: object) => any} deps.enqueueSave
  * @param {(job: object) => void} deps.queueRoleUpdate
  * @param {(userObj: object, author: object, message: object) => Promise<"cooldown"|"missed"|"caught"|undefined>} deps.giveRandomReward
@@ -81,6 +82,14 @@ export function createMessageHandler({
 
       try {
         await message.react("💰").catch(() => {});
+      } catch {}
+    }
+
+    // 🍬 Chance to find a Rare Candy (a separate roll, only when configured)
+    if (config.candyChance > 0 && random() < config.candyChance && grantItem(userObj, "rare_candy", 1).ok) {
+      try { log("chat_rare_candy", userId, { qty: 1 }); } catch {}
+      try {
+        await message.react("🍬").catch(() => {});
       } catch {}
     }
 

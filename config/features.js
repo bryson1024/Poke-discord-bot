@@ -129,3 +129,32 @@ export function isHeldItemCapabilityEnabled(capability, env = process.env, userI
 
 export const heldItemCapabilities = (env = process.env, userId = null) =>
   Object.freeze(Object.fromEntries(HELD_ITEM_CAPABILITIES.map((c) => [c, isHeldItemCapabilityEnabled(c, env, userId)])));
+
+// ----------------------------------------------------------
+// DASHBOARD_FIGHTS_ENABLED: the dashboard's Battle page, which starts Casual
+// and Ranked battles and Challenges and posts them to Discord as the commands
+// do (services/dashboardFights.js). Off unless "1"/"true"/"yes"/"on".
+// ----------------------------------------------------------
+export function isDashboardFightsEnabled(env = process.env) {
+  return TRUE.has(String(env.DASHBOARD_FIGHTS_ENABLED ?? "").trim().toLowerCase());
+}
+
+// ----------------------------------------------------------
+// KYUREM_FUSION_ENABLED: Black Kyurem and White Kyurem (utils/fusions.js).
+// Owning Kyurem plus Zekrom/Reshiram unlocks the form on Kyurem's team slots.
+// Off unless "1"/"true"/"yes"/"on": nobody can pick a form, and a stored
+// form shows and battles as plain Kyurem.
+// ----------------------------------------------------------
+export function isKyuremFusionEnabled(env = process.env) {
+  return TRUE.has(String(env.KYUREM_FUSION_ENABLED ?? "").trim().toLowerCase());
+}
+
+// ----------------------------------------------------------
+// NECROZMA_FUSION_ENABLED: Dusk Mane and Dawn Wings Necrozma (utils/fusions.js).
+// Owning Necrozma plus Solgaleo/Lunala unlocks the form on Necrozma's team
+// slots. Off unless "1"/"true"/"yes"/"on", and Gen 7 must also be live
+// (POKEMON_GENERATIONS); off = a stored form shows and battles as Necrozma.
+// ----------------------------------------------------------
+export function isNecrozmaFusionEnabled(env = process.env) {
+  return TRUE.has(String(env.NECROZMA_FUSION_ENABLED ?? "").trim().toLowerCase());
+}

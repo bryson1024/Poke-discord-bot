@@ -18,6 +18,7 @@ import { GifReader } from "omggif";
 import { spriteRecord } from "../sprites.js";
 import { isMegaId, megaSpriteRecord } from "../megas.js";
 import { isSpriteVariant, specialSpriteFile } from "../specialVariants.js";
+import { isFusionSpriteId } from "../fusions.js";
 import { stepCount } from "../trainerIdle.js";
 import { motionStates, poseOf, cardSchedule } from "../trainerMotion.js";
 import { trainerIdle, trainersAnimated, trainerParts } from "../trainerAssets.js";
@@ -85,6 +86,8 @@ async function decodeFirstFrame(file) {
 export function spriteFileFor(id, variant = "normal") {
   // A Special variant (the Squirtle Squad Leader) has its own file, outside the species manifest.
   if (isSpriteVariant(variant)) return `sprites/pokemon/${specialSpriteFile(variant, "normal")}`;
+  // Black/White Kyurem: <variant>/646-black.gif (utils/fusions.js).
+  if (isFusionSpriteId(id)) return `sprites/pokemon/${variant === "shiny" || variant === "grayscale" ? variant : "normal"}/${id}.gif`;
   if (isMegaId(id)) {
     const rec = megaSpriteRecord(id)?.[variant];
     return rec?.file ? `sprites/pokemon/mega/${rec.file}` : null;

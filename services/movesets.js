@@ -23,11 +23,17 @@
 // ==========================================================
 
 import { getSpecies, getMove } from "../utils/battle/data.js";
+import { isFullSimEnabled } from "../config/fullSim.js";
 import { getTraining } from "../utils/training.js";
-import { autoMoveset, movesLearned } from "../utils/battle/moveset.js";
+import { movesLearned } from "../utils/battle/moveset.js";
+import { moveDetails } from "../utils/battle/moveText.js";
+import { tmMove } from "../utils/battle/tmData.js";
 import { slotCopyUid, slotBoxUid } from "./ownership.js";
 import { copyTraining, ownsVariant } from "./box.js";
 import { normalizeVariant, specialExtraMoves } from "../utils/specialVariants.js";
+// fullSimCutover imports this module back; each uses the other only inside functions.
+import { defaultMoves } from "./fullSimCutover.js";
+import { getFusion, fusionMovesAt, fusionUnlocked, storedTeamFusion, isFusionFormEnabled } from "../utils/fusions.js";
 
 export const TEAM_TYPES = Object.freeze(["display", "battle"]);
 export const MAX_MOVES = 4;
@@ -46,20 +52,38 @@ export const copyUid = (user, speciesId, variant, uid) => {
   return slotBoxUid(user, slot) ?? slotCopyUid(user, slot);
 };
 
-/** TM moves this copy learned (none for a plain copy). Unknown move ids are skipped. */
+/**
+ * TM moves this copy learned (none for a plain copy). Unknown move ids are
+ * skipped, and so are full-sim TM moves while FULL_SIM_ENABLED is off: they
+ * stay on the copy and come back when it's on again.
+ */
 export function tmMovesFor(user, speciesId, variant, { uid = null } = {}) {
   const u = copyUid(user, speciesId, variant, uid);
   const rec = u ? user.customPokemon?.[u] : null;
   if (!rec || rec.suspended) return [];
-  return rec.tmMoves.filter((m) => getMove(m));
+  return rec.tmMoves.filter((m) => getMove(m) && (tmMove(m)?.status !== "fullsim" || isFullSimEnabled()));
+}
+
+/**
+ * Fusion forms (utils/fusions.js): the form's own moves (Fusion Bolt +
+ * Freeze Shock, Fusion Flare + Ice Burn) this copy may equip while it uses
+ * `form`, at or below `level`: only with fusion switched on, the form
+ * unlocked on this line, and moves the battle engine knows (the legacy
+ * engine has no Freeze Shock or Ice Burn). [{ id, learnedAt, source: "form", form }]
+ */
+export function formMoves(user, speciesId, variant, form, level, { env } = {}) {
+  const f = getFusion(form);
+  if (!f || f.species !== Number(speciesId) || !isFusionFormEnabled(form, env ?? process.env) || !fusionUnlocked(user, form, normV(variant))) return [];
+  return fusionMovesAt(form, level).filter(([, id]) => getMove(id, env)).map(([at, id]) => ({ id, learnedAt: at, source: "form", form }));
 }
 
 /**
  * Every move this copy may equip: level-up moves learned at or below its
- * real Level (earliest Level kept), then its TM moves. [{ id, learnedAt|null, source }]
+ * real Level (earliest Level kept), then its TM moves, then (a Pokémon using
+ * a fusion form, `form`) that form's moves. [{ id, learnedAt|null, source }]
  */
-export function learnableMoves(user, speciesId, variant, { level = null, uid = null } = {}) {
-  const species = getSpecies(Number(speciesId));
+export function learnableMoves(user, speciesId, variant, { level = null, uid = null, env, form = null } = {}) {
+  const species = getSpecies(Number(speciesId), env);
   if (!species) return [];
   // The copy's own Level when one is named; else the line's best copy.
   const own = uid != null ? copyUid(user, speciesId, variant, uid) : null;
@@ -67,7 +91,7 @@ export function learnableMoves(user, speciesId, variant, { level = null, uid = n
   const seen = new Map();
   for (const [at, moveId] of species.levelMoves ?? []) {
     if (at > lv) break;
-    if (!seen.has(moveId) && getMove(moveId)) seen.set(moveId, { id: moveId, learnedAt: at, source: "level" });
+    if (!seen.has(moveId) && getMove(moveId, env)) seen.set(moveId, { id: moveId, learnedAt: at, source: "level" });
   }
   // A Special variant's own moves (the Squirtle Squad Leader's Aqua Jet and Surf), from Lv 1.
   for (const moveId of specialExtraMoves(normV(variant))) {
@@ -76,6 +100,7 @@ export function learnableMoves(user, speciesId, variant, { level = null, uid = n
   for (const moveId of tmMovesFor(user, speciesId, variant, { uid })) {
     if (!seen.has(moveId)) seen.set(moveId, { id: moveId, learnedAt: null, source: "tm" });
   }
+  if (form) for (const m of formMoves(user, speciesId, variant, form, lv, { env })) if (!seen.has(m.id)) seen.set(m.id, m);
   return [...seen.values()];
 }
 
@@ -84,12 +109,20 @@ export function learnableMoves(user, speciesId, variant, { level = null, uid = n
  * still use (null when none is stored or none survives → automatic moves).
  * With a valid `uid`, the copy's own selection is used first, then the line's.
  */
-export function chosenMoves(user, team, speciesId, variant, { uid = null } = {}) {
+// `form` (a fusion form): the fusion form this copy fights as, whose own
+// moves count too. undefined = the form it uses on that stored team (none
+// when fusion is off or the partner is gone, so those moves drop out).
+export function chosenMoves(user, team, speciesId, variant, { uid = null, form } = {}) {
   const u = copyUid(user, speciesId, variant, uid);
   const stored = user?.movesets?.[team] ?? {};
   const raw = (u && stored[copyKey(u)]) || stored[lineKey(speciesId, variant)];
   if (!Array.isArray(raw) || !raw.length) return null;
-  const allowed = new Set(learnableMoves(user, speciesId, variant, { uid: u }).map((m) => m.id));
+  const fusion = form === undefined ? storedTeamFusion(user, team, speciesId, variant, { uid: u }) : form;
+  const allowed = new Set(learnableMoves(user, speciesId, variant, { uid: u, form: fusion }).map((m) => m.id));
+  // Full sim: a move picked before the switch that the new learnsets no
+  // longer teach is kept until the player edits this Moveset (saving runs
+  // validateMoveset, which allows only the new pool).
+  if (isFullSimEnabled()) for (const m of learnableMoves(user, speciesId, variant, { uid: u, env: {} })) allowed.add(m.id);
   const out = [...new Set(raw)].filter((m) => allowed.has(m)).slice(0, MAX_MOVES);
   return out.length ? out : null;
 }
@@ -97,7 +130,9 @@ export function chosenMoves(user, team, speciesId, variant, { uid = null } = {})
 const fail = (error, code) => ({ ok: false, status: 400, error, code });
 
 /** Validate a moveset the dashboard sent. → { ok:true, moves, uid } | { ok:false, status, error, code } */
-export function validateMoveset(user, speciesId, variant, moves, { uid = null } = {}) {
+// `form`: the fusion form this slot uses on the team being edited (Teams page,
+// possibly not saved yet); its moves are allowed when it is unlocked.
+export function validateMoveset(user, speciesId, variant, moves, { uid = null, form = null } = {}) {
   const id = Number(speciesId);
   if (!Number.isInteger(id) || !getSpecies(id)) return fail("Unknown Pokémon.", "bad_species");
   if (!ownsVariant(user, id, normV(variant))) return fail("You don't own that Pokémon.", "unowned");
@@ -106,7 +141,7 @@ export function validateMoveset(user, speciesId, variant, moves, { uid = null } 
   if (!Array.isArray(moves) || moves.length < 1 || moves.length > MAX_MOVES) return fail(`Choose 1–${MAX_MOVES} moves.`, "bad_size");
   if (moves.some((m) => typeof m !== "string" || m.length > 40)) return fail("Invalid move.", "bad_move");
   if (new Set(moves).size !== moves.length) return fail("Each move can only be equipped once.", "duplicate");
-  const allowed = new Set(learnableMoves(user, id, variant, { uid: u }).map((m) => m.id));
+  const allowed = new Set(learnableMoves(user, id, variant, { uid: u, form: typeof form === "string" ? form : null }).map((m) => m.id));
   const unknown = moves.filter((m) => !allowed.has(m));
   if (unknown.length) {
     const names = unknown.map((m) => getMove(m)?.name ?? m).join(", ");
@@ -136,17 +171,18 @@ export function setMoveset(user, team, speciesId, variant, moves, { uid = null }
  * The slot's uid may name a box copy or a TM copy; both resolve through
  * copyUid() (a TM-only check here refused every box copy, 2026-11-12).
  */
-export function saveMoveset(user, { team, pokeId, variant, moves, uid = null } = {}) {
+export function saveMoveset(user, { team, pokeId, variant, moves, uid = null, form = null } = {}) {
   if (!TEAM_TYPES.includes(team)) return { ok: false, status: 400, error: "Unknown team type", code: "bad_team" };
   const v = normV(variant);
   const copy = uid == null ? null : copyUid(user, pokeId, v, uid);
   if (uid != null && !copy) return fail("That Pokémon copy no longer exists. Reload and try again.", "unknown_copy");
   if (moves !== null) {
-    const check = validateMoveset(user, pokeId, v, moves, { uid: copy });
+    const check = validateMoveset(user, pokeId, v, moves, { uid: copy, form });
     if (!check.ok) return check;
     setMoveset(user, team, pokeId, v, check.moves, { uid: copy });
   } else setMoveset(user, team, pokeId, v, null, { uid: copy });
-  return { ok: true, team, uid: copy, moves: chosenMoves(user, team, pokeId, v, { uid: copy }) };
+  // Echo what was saved: with the form being edited (it may not be on the saved team yet).
+  return { ok: true, team, uid: copy, moves: chosenMoves(user, team, pokeId, v, { uid: copy, ...(typeof form === "string" && { form }) }) };
 }
 
 /**
@@ -160,7 +196,10 @@ export function keepMovesOnLevelUp(user, speciesId, variant, { uid = null, fromL
   if (!(toLevel > fromLevel) || !movesLearned(speciesId, fromLevel, toLevel).length) return [];
   const u = copyUid(user, speciesId, variant, uid);
   const allowed = new Set(learnableMoves(user, speciesId, variant, { uid: u }).map((m) => m.id));
-  const before = autoMoveset(speciesId, fromLevel).filter((m) => allowed.has(m));
+  // Full sim: recorded moves the new learnsets don't teach still count, as in chosenMoves.
+  if (isFullSimEnabled()) for (const m of learnableMoves(user, speciesId, variant, { uid: u, env: {} })) allowed.add(m.id);
+  // The moves it fought with: on the full sim, from its cutover record when it has one.
+  const before = defaultMoves(user, { id: Number(speciesId), variant: normV(variant), ...(u && { uid: u }) }, fromLevel).filter((m) => allowed.has(m));
   if (!before.length) return []; // no real move yet: its first move is used
   const pinned = [];
   for (const team of TEAM_TYPES) {
@@ -171,8 +210,9 @@ export function keepMovesOnLevelUp(user, speciesId, variant, { uid = null, fromL
   return pinned;
 }
 
-/** Display info for a move id. */
+/** Display info for a move id, with what it does (desc), accuracy (acc) and priority. */
 export function moveInfo(moveId) {
   const m = getMove(moveId);
-  return m ? { id: moveId, name: m.name, type: m.type ?? null, power: m.power ?? null, category: m.category ?? null } : { id: moveId, name: String(moveId), type: null, power: null, category: null };
+  // desc/acc/priority: what it does, for the dashboard's ⓘ (utils/battle/moveText.js).
+  return m ? { id: moveId, name: m.name, type: m.type ?? null, power: m.power ?? null, category: m.category ?? null, ...moveDetails(moveId, m) } : { id: moveId, name: String(moveId), type: null, power: null, category: null, ...moveDetails(moveId, null) };
 }
