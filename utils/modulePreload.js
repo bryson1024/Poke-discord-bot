@@ -61,11 +61,15 @@ const cache = new Map(); // file → { mtimeMs, html }
  * Express middleware: serves public/<page>/ and public/<page>/index.html
  * with the hints. Anything else (and a page without index.html) falls
  * through to express.static.
+ *
+ * public/<page> without the trailing slash falls through too: express.static
+ * redirects it to public/<page>/, which pages with relative asset links
+ * (admindashboard, dashboard: href="style.css") need to load their files.
  */
 export function modulePreloadPages(root) {
   return (req, res, next) => {
     if (req.method !== "GET" && req.method !== "HEAD") return next();
-    const m = /^\/([a-z0-9-]+)\/?(?:index\.html)?$/.exec(req.path);
+    const m = /^\/([a-z0-9-]+)\/(?:index\.html)?$/.exec(req.path);
     if (!m) return next();
     const file = path.join(root, m[1], "index.html");
     let stat;
