@@ -50,7 +50,8 @@ export function categoryBadge(category) {
 export function moveMeta(m, { extra = [] } = {}) {
   const bits = [];
   if (m?.power) bits.push(`${esc(m.power)} power`);
-  if (m?.accuracy === true) bits.push("never misses");
+  const status = String(m?.category ?? "").toLowerCase() === "status";
+  if (m?.accuracy === true) { if (!status) bits.push("never misses"); } // Swords Dance etc. don't roll to hit
   else if (Number.isFinite(m?.accuracy)) bits.push(`${esc(m.accuracy)}%`);
   for (const x of extra) if (x) bits.push(esc(x));
   return `<span class="cc-movemeta">${typeChip(m?.type)}${categoryBadge(m?.category)}${bits.length ? `<span class="cc-movemeta-nums">${bits.join(" · ")}</span>` : ""}</span>`;

@@ -32,7 +32,7 @@ import { customCopiesOf, plainCount } from "./ownership.js";
 import { isTmEnabled } from "../config/tmFeatures.js";
 import { copiesOf } from "./box.js";
 import { abilityView, abilityInfo } from "./abilities.js";
-import { tmMovesForSpecies } from "../utils/battle/tmData.js";
+import { availableTmMovesForSpecies } from "../utils/battle/tmData.js";
 
 const sum = (s) => (s ? s.hp + s.atk + s.def + s.spa + s.spd + s.spe : null);
 const nameOf = (id) => displaySpeciesName(id, getSpeciesEntry(id)?.name);
@@ -94,7 +94,7 @@ export function speciesLearnset(id, { env = process.env } = {}) {
     levelUp.push({ ...moveInfo(moveId), learnedAt: at });
   }
   const tm = isTmEnabled(env)
-    ? tmMovesForSpecies(id, { status: "launch" }).filter((m) => getMove(m)).map(moveInfo).sort((a, b) => a.name.localeCompare(b.name))
+    ? availableTmMovesForSpecies(id, env).filter((m) => getMove(m)).map(moveInfo).sort((a, b) => a.name.localeCompare(b.name))
     : [];
   return { levelUp, tm };
 }

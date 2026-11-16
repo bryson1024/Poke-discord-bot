@@ -12,13 +12,14 @@
 // ==========================================================
 
 import { toast, showExpired, pageHref } from "/public/shared/shell.js";
-import { moveMeta, tmDisc, categoryBadge } from "/public/shared/moveMeta.js";
+import { moveMeta, moveDescLine, tmDisc, categoryBadge } from "/public/shared/moveMeta.js";
 
 const LABEL = { display: "Casual team", battle: "Ranked team" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const newRequestId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
-// Standard move row: name on top, type · category · power · accuracy below.
-const moveRow = (m, prefix = "") => `<span class="tt-move"><b>${prefix}${esc(m.name)}</b>${moveMeta(m)}</span>`;
+// Standard move row: name on top, type · category · power · accuracy below,
+// then what the move does (status moves say nothing without it).
+const moveRow = (m, prefix = "") => `<span class="tt-move"><b>${prefix}${esc(m.name)}</b>${moveMeta(m)}${moveDescLine({ ...m, acc: null })}</span>`; // accuracy is already on the meta line
 
 const STYLE = `
 .tmx-teach{width:min(560px,calc(100vw - 32px));max-height:min(88vh,88dvh);padding:0;border:1.5px solid var(--cc-line);border-radius:var(--cc-r-md,14px);background:var(--cc-surface);color:var(--cc-text);}

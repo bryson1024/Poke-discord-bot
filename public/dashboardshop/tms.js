@@ -12,7 +12,7 @@
 // ======================================================================
 
 import { showMessage, isExpired, showExpired } from "/public/shared/shell.js";
-import { moveMeta, tmDisc, categoryBadge } from "/public/shared/moveMeta.js";
+import { moveMeta, moveDescLine, tmDisc, categoryBadge } from "/public/shared/moveMeta.js";
 import { filterTms } from "/public/dashboardshop/tmFilter.js";
 
 const TYPES = ["Normal", "Fire", "Water", "Electric", "Grass", "Ice", "Fighting", "Poison", "Ground", "Flying", "Psychic", "Bug", "Rock", "Ghost", "Dragon", "Dark", "Steel", "Fairy"];
@@ -115,7 +115,7 @@ function card(t) {
   return `<div class="shop-item tmx-item" data-tier="${esc(t.tier)}">
     <div class="tmx-top">${tmDisc(t.type, { size: 60 })}<span class="tmx-tier">${esc(TIER_LABEL[t.tier] ?? t.tier)}</span></div>
     <h3>${esc(t.name)}</h3>
-    <p class="desc">${moveMeta(t)}</p>
+    <p class="desc">${moveMeta(t)}${moveDescLine({ ...t, acc: null })}</p>
     <p class="tmx-meta">${t.teaches > 0 ? `${fmt(t.teaches)} of your Pokémon can learn it` : "None of your Pokémon can learn it"}${t.owned ? ` · <b>You have ${fmt(t.owned)}</b>` : ""}</p>
     <p class="price">${fmt(t.price)} CC</p>
     <button type="button" class="buy-btn" data-tm="${esc(t.item)}"${affordable ? "" : " disabled"} aria-label="Buy ${esc(t.name)} for ${fmt(t.price)} CC">${affordable ? "Buy" : "Not enough CC"}</button>

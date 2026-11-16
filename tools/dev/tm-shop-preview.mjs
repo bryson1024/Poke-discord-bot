@@ -18,7 +18,10 @@ const { tmShopView, buyTms, tmLearners } = await imp("services/tmShop.js");
 const { runInventoryTransaction } = await imp("services/inventory.js");
 
 const ID = "100000000000000009";
-const env = { TM_ENABLED: "1" };
+// --full-sim: also sell the full-sim TMs (status moves etc.), as FULL_SIM_ENABLED does.
+const FULL = process.argv.includes("--full-sim");
+if (FULL) process.env.FULL_SIM_ENABLED = "1";
+const env = { TM_ENABLED: "1", ...(FULL && { FULL_SIM_ENABLED: "1" }) };
 const trainerData = {
   [ID]: {
     id: ID, cc: 26000, tp: 4100, rank: "Advanced Trainer",
