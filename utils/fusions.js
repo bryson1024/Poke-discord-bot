@@ -13,6 +13,8 @@
 //     Kyurem copy's.
 //   • Team rule (Casual and Ranked): a team with a fused Kyurem can't also
 //     have Kyurem, Zekrom or Reshiram, so at most one fused Kyurem per team.
+//     A fused Kyurem also takes the team's one Mega slot (owner, 2026-11-16:
+//     its 700 BST is Mega-level), so no Mega beside it.
 //     The Showcase never fights and has no such rule.
 //   • Switch: KYUREM_FUSION_ENABLED (config/features.js). Off = nobody can
 //     pick a form, and a stored form shows and battles as plain Kyurem.
@@ -168,11 +170,14 @@ export function fusionBattleProfile(id) {
  * team the slot is on. Pure.
  * @returns {null | {ok:true, formId, profile} | {ok:false, reason, formId}}
  */
-export function resolveSlotFusion(user, slot, team, { env = process.env } = {}) {
+// megaActive: a Mega on the same team really battles as a Mega this fight;
+// the fused Kyurem then fights as Kyurem (one Mega slot per team).
+export function resolveSlotFusion(user, slot, team, { env = process.env, megaActive = false } = {}) {
   const formId = fusionFieldOf(slot);
   if (!formId) return null;
   if (!isKyuremFusionEnabled(env)) return { ok: false, reason: "Kyurem fusion is switched off", formId };
   if (!fusionFitsSlot(user, { id: Number(slot.id), variant: slot.variant === "shiny" ? "shiny" : "normal" }, formId)) return { ok: false, reason: "not unlocked (Kyurem and its partner must both be owned)", formId };
   if (fusionTeamConflict(team)) return { ok: false, reason: "team has Kyurem, Zekrom or Reshiram too", formId };
+  if (megaActive) return { ok: false, reason: "a Mega already uses the team's Mega slot", formId };
   return { ok: true, formId, profile: fusionBattleProfile(formId) };
 }

@@ -58,6 +58,9 @@ export function fusionSelectionError(user, slots, { env = process.env, teamRule 
   if (teamRule) {
     const conflict = fusionTeamConflict(slots);
     if (conflict) return fail(400, conflict.error, "fusion_team_rule");
+    // Black/White Kyurem's 700 BST is Mega-level: it takes the team's one Mega slot.
+    const mega = slots.find((s) => s.mega);
+    if (mega) return fail(400, `${getFusion(fused[0].form).name} uses the team's Mega slot, so the team can't also have a Mega. Only one Mega or Black/White Kyurem per team.`, "fusion_mega_slot");
   }
   return null;
 }

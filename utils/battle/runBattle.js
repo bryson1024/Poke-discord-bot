@@ -98,7 +98,7 @@ export function buildTeam(user, { env = process.env, team = user.displayedPokemo
       // Black/White Kyurem (utils/fusions.js, fail-closed): resolved first, so
       // the form's own moves (Freeze Shock, Fusion Bolt, …) count only when it
       // really fights as that form.
-      const fusion = resolveSlotFusion(user, slot, owned, { env });
+      const fusion = resolveSlotFusion(user, slot, owned, { env, megaActive: !!mega?.ok });
       if (fusion && !fusion.ok && isKyuremFusionEnabled(env)) console.warn(`⚠️ ${fusion.formId} battles as Kyurem (${fusion.reason}).`);
       // The slot's own copy's moves (any copy, docs/adr/0001), else the line's.
       const moves = chosenMoves(user, movesetTeam, slot.id, slot.variant, { uid: copyUid ?? uid, form: fusion?.ok ? fusion.formId : null });

@@ -163,6 +163,20 @@ section("battle: fusion stats when valid, plain Kyurem otherwise (fail-closed)")
   assertTrue(!back[0].fusionForm && back[0].name === "Kyurem", "saved fighter fights as Kyurem when switched off");
 }
 
+section("Black/White Kyurem uses the team's one Mega slot");
+{
+  const { fusionSelectionError } = await import("../services/fusionTeam.js");
+  const u = player();
+  const withMega = [clone(BLACK), { id: 6, variant: "normal", mega: "mega-charizard-x" }];
+  assertEqual(fusionSelectionError(u, withMega, { env: ON })?.code, "fusion_mega_slot", "Casual/Ranked: fused Kyurem + a Mega refused");
+  assertTrue(/Mega slot/.test(fusionSelectionError(u, withMega, { env: ON })?.error ?? ""), "error names the Mega slot");
+  assertEqual(fusionSelectionError(u, withMega, { env: ON, teamRule: false }), null, "Showcase: both allowed (never fights)");
+  assertEqual(fusionSelectionError(u, [clone(BLACK), { id: 6, variant: "normal" }], { env: ON }), null, "no Mega: fine");
+  const r = F.resolveSlotFusion(u, BLACK, [BLACK], { env: ON, megaActive: true });
+  assertTrue(r && !r.ok && /Mega slot/.test(r.reason), "battle: a Mega really battling → Kyurem fights as Kyurem");
+  assertTrue(F.resolveSlotFusion(u, BLACK, [BLACK], { env: ON, megaActive: false })?.ok, "no active Mega → fights as Black Kyurem");
+}
+
 section("form moves: equippable only while Kyurem uses that form");
 {
   const M = await import("../services/movesets.js");

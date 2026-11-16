@@ -347,6 +347,12 @@ function cycleMega(t, i) {
       toast(`One Mega per team: ${species(list[other].id).name} goes back to its base form.`);
       delete list[other].mega;
     }
+    // Black/White Kyurem takes the Mega slot too: it goes back to Kyurem.
+    const fused = isShowcase(t) ? -1 : list.findIndex((m, k) => k !== i && fusionOf(m));
+    if (fused >= 0) {
+      toast(`One Mega slot per team: ${slotName(list[fused])} goes back to Kyurem.`);
+      delete list[fused].form;
+    }
     s.mega = next;
   } else delete s.mega;
   state.draft[t] = list;
@@ -372,6 +378,14 @@ function cycleFusion(t, i) {
     if (clash) {
       toast(`${clash} Remove Kyurem, Zekrom and Reshiram from this team first.`);
       next = null;
+    }
+  }
+  if (next && !isShowcase(t)) {
+    // Black/White Kyurem uses the team's one Mega slot: a Mega goes back to its base form.
+    const mega = list.findIndex((m, k) => k !== i && m.mega && state.megaOn);
+    if (mega >= 0) {
+      toast(`${fusionOf({ form: next })?.name ?? "Black/White Kyurem"} uses the team's Mega slot: ${species(list[mega].id).name} goes back to its base form.`);
+      delete list[mega].mega;
     }
   }
   if (next) s.form = next;
@@ -405,6 +419,7 @@ async function copyFrom(target, source = SOURCES[target].find((t) => team(t).len
       if (lines.has(keyOf(s))) { dropped.push({ s, why: "already on the team" }); continue; }
       if (target === "battle" && isMythic(s.id) && mythics++ >= 1) { dropped.push({ s, why: "one mythic-tier Pokémon per Ranked team" }); continue; }
       if (s.mega && megas++ >= 1) delete s.mega; // one Mega per team: the rest come as their base form
+      if (fusionOf(s) && megas++ >= 1) delete s.form; // Black/White Kyurem uses that same Mega slot
       if (s.form && fusionClash(kept, s)) delete s.form; // Black/White Kyurem beside Kyurem, Zekrom or Reshiram: plain Kyurem
       if (!s.form && fusionClash(kept, s)) { const f = kept.find((m) => fusionOf(m)); if (f) delete f.form; }
       lines.add(keyOf(s)); // each Pokémon once on Casual and Ranked
@@ -638,12 +653,14 @@ app.addEventListener("toggle", (e) => { if (e.target.id === "teamCheck") state.c
 function rules() {
   const list = team("battle");
   const mythic = list.filter((s) => isMythic(s.id)).length;
-  const mega = state.megaOn ? list.filter((s) => s.mega).length : 0;
+  // The one Mega slot: a Mega or Black/White Kyurem (its BST is Mega-level).
+  const mega = (state.megaOn ? list.filter((s) => s.mega).length : 0) + list.filter((s) => fusionOf(s)).length;
+  const showMega = state.megaOn || state.fusion.enabled;
   const err = !!state.error.battle;
   return `<ul class="tm-rules" aria-label="Ranked team rules">
     <li class="tm-rule"><svg class="tm-ic" aria-hidden="true"><use href="#tm-swords"/></svg>Battles at <b>Lv ${BATTLE_LEVEL}</b></li>
     <li class="tm-rule${err ? " is-error" : mythic >= 1 ? " is-full" : ""}">Mythic <b>${mythic}/1</b></li>
-    ${state.megaOn ? `<li class="tm-rule${mega >= 1 ? " is-full" : ""}">Mega <b>${mega}/1</b></li>` : ""}
+    ${showMega ? `<li class="tm-rule${mega >= 1 ? " is-full" : ""}" title="One Mega or Black/White Kyurem per team">Mega slot <b>${mega}/1</b></li>` : ""}
     <li class="tm-rule">Slots <b>${list.length}/6</b></li>
     ${list.length ? `<li class="tm-rule">Team power at Lv ${BATTLE_LEVEL} <b>${fmt(list.reduce((n, s) => n + power50Of(s), 0))}</b>${powerInfoButton()}</li>` : ""}
   </ul>`;
