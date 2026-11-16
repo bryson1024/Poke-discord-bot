@@ -24,6 +24,7 @@ import { learnableMoves, chosenMoves, moveInfo as movesetMoveInfo } from "./move
 import { customCopiesOf, plainCount } from "./ownership.js";
 import { isTmEnabled } from "../config/tmFeatures.js";
 import { copiesOf } from "./box.js";
+import { abilityView } from "./abilities.js";
 import { tmMovesForSpecies } from "../utils/battle/tmData.js";
 
 const sum = (s) => (s ? s.hp + s.atk + s.def + s.spa + s.spd + s.spe : null);
@@ -126,6 +127,8 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
         battle: chosenMoves(user, "battle", id, variant)?.map(movesetMoveInfo) ?? null,
       },
       learnable: species ? learnableMoves(user, id, variant, { level }).map((m) => ({ ...movesetMoveInfo(m.id), learnedAt: m.learnedAt, source: m.source })) : [],
+      // Full sim: its regular abilities and, per team, the choice (null = Automatic) and Automatic's pick.
+      ability: abilityView(user, id, variant, { env }),
       nextMoves: species ? movesLearned(id, level, Math.min(100, level + 20)).map(moveInfo) : [],
       teams: teamSlots(user, id, variant),
       // TM system (T1): untrained copies vs. customized copies of this line.
@@ -153,6 +156,7 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
           display: chosenMoves(user, "display", id, variant, { uid: c.uid })?.map(movesetMoveInfo) ?? null,
           battle: chosenMoves(user, "battle", id, variant, { uid: c.uid })?.map(movesetMoveInfo) ?? null,
         },
+        ability: abilityView(user, id, variant, { uid: c.uid, env }),
         };
       }) : [],
     };

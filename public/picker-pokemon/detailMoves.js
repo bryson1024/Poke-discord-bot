@@ -65,3 +65,20 @@ export function learnLabel(row, filter = "all") {
   const lv = `Lv ${Math.max(1, row.learnedAt)}`;
   return row.byTm && filter === "all" ? `${lv} · TM` : lv;
 }
+
+/**
+ * The Ability this copy fights with on `team` (full sim; null when the
+ * server sends none): { name, desc, auto, only } where auto = no choice
+ * saved (the Battle plan's pick, made per fight) and only = the species has
+ * one regular ability, so there is nothing to choose.
+ * Per copy first (services/abilities.js chosenAbility), else the line's.
+ */
+export function equippedAbility(line, copy, team) {
+  const view = copy?.ability ?? line?.ability ?? null;
+  const t = view?.teams?.[team];
+  if (!view || !t) return null;
+  const name = t.chosen ?? t.automatic;
+  if (!name) return null;
+  const info = view.options.find((o) => o.name === name) ?? { name, desc: "" };
+  return { name: info.name, desc: info.desc, auto: !t.chosen, only: view.options.length < 2 };
+}

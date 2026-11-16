@@ -18,7 +18,7 @@
 //                       of the saved ones
 //            megaName:  set when the slot battles as a Mega form
 //            uid:       the copy to show (a Teams slot, a Collection box
-//                       tile): its Level, stats and equipped moves per team
+//                       tile): its Level, stats, equipped moves and Ability per team
 //            mode:      "dex" (Pokédex): base stats and every move it can
 //                       learn (level-up / TM filter) instead of equipped moves
 // The move choices are public/picker-pokemon/detailMoves.js.
@@ -28,7 +28,7 @@ import { scanFx } from "/public/shared/spriteFx.js";
 import { pageHref } from "/public/shared/shell.js";
 import { openTeachDialog } from "/public/shared/teachTm.js";
 import { moveMeta } from "/public/shared/moveMeta.js";
-import { pickCopy, equippedMoves, learnsetRows, learnLabel } from "/public/picker-pokemon/detailMoves.js";
+import { pickCopy, equippedMoves, equippedAbility, learnsetRows, learnLabel } from "/public/picker-pokemon/detailMoves.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const dex = (id) => `#${String(id).padStart(4, "0")}`;
@@ -127,9 +127,11 @@ function copyMovesSection(d, line, ctx, opts) {
     ${many && copy ? `<p class="dt-muted dt-which">Showing your ${shownVariant === "shiny" ? "shiny " : ""}${esc(d.name)} at Lv ${copy.level}${where ? ` (${where})` : ""}.</p>` : ""}
     ${["display", "battle"].map((team) => {
       const { auto, moves } = equippedMoves(line, copy, team);
-      return `<section class="dt-sec"><h3>${team === "battle" ? "Ranked team moves" : "Casual team moves"}${auto ? " · automatic" : ""}</h3><div class="dt-moves">${moves.map((m) => `<div class="dt-move"><span>${esc(m.name)}${moveMeta(m)}</span></div>`).join("")}</div></section>`;
+      const ab = equippedAbility(line, copy, team);
+      const abLine = ab ? `<div class="dt-ability"><span class="dt-ability-name">Ability: <b>${esc(ab.name)}</b>${ab.only ? "" : ` <small class="dt-muted">${ab.auto ? "automatic" : "chosen"}</small>`}</span>${ab.desc ? `<small class="dt-muted">${esc(ab.desc)}</small>` : ""}</div>` : "";
+      return `<section class="dt-sec"><h3>${team === "battle" ? "Ranked team moves" : "Casual team moves"}${auto ? " · automatic" : ""}</h3><div class="dt-moves">${moves.map((m) => `<div class="dt-move"><span>${esc(m.name)}${moveMeta(m)}</span></div>`).join("")}</div>${abLine}</section>`;
     }).join("")}
-    <section class="dt-sec"><p class="dt-muted" style="margin:0">${next.length ? `Learns next: ${next.map((m) => esc(m.name)).join(", ")}. ` : ""}${ctx.actionsHTML ? "Each team keeps its own moves." : `Change moves on the <a href="${pageHref("/public/teams/", ctx.userId)}">Teams page</a> (each team keeps its own).`}</p></section>`;
+    <section class="dt-sec"><p class="dt-muted" style="margin:0">${next.length ? `Learns next: ${next.map((m) => esc(m.name)).join(", ")}. ` : ""}${ctx.actionsHTML ? "Each team keeps its own moves and ability." : `Change moves and ability on the <a href="${pageHref("/public/teams/", ctx.userId)}">Teams page</a> (each team keeps its own).`}</p></section>`;
 }
 
 // Pokédex: every move the species can learn, with a Level-up / TM filter.

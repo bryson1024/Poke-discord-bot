@@ -58,6 +58,22 @@ export function recommendedFor(plans, team, s) {
   return { moves: rec.moves, planName: plan?.name ?? "" };
 }
 
+/**
+ * Members on Automatic whose ability changes if Team `team` switches to
+ * `toPlan`: [{ speciesId, variant, uid, from, to }] (saved team, one row
+ * per slot). Chosen abilities and Mega slots never change with the plan.
+ */
+export function abilityChanges(plans, team, toPlan) {
+  const view = plans?.teams?.[team];
+  if (!view || view.plan === toPlan) return [];
+  return (view.slots ?? []).flatMap((x) => {
+    const a = x.ability;
+    if (!a || a.chosen) return [];
+    const from = a.byPlan?.[view.plan] ?? null, to = a.byPlan?.[toPlan] ?? null;
+    return from && to && from !== to ? [{ speciesId: x.speciesId, variant: x.variant, uid: x.uid ?? null, from, to }] : [];
+  });
+}
+
 export async function loadPlans(userId) {
   const res = await fetch(`/api/battle-plans?${new URLSearchParams({ id: userId })}`, { credentials: "same-origin" });
   if (!res.ok) return { enabled: false, plans: [], teams: {} };

@@ -148,7 +148,7 @@ function planHelper(speciesId, ids, plan, mates, env) {
       const team = [{ speciesId, moves: [] }, ...mates];
       const weather = teamWeatherOf(team, env);
       if (!weather) return null;
-      const setsIt = (m) => m.moves.some((id) => WEATHER_OF[id] === weather) || weatherAbility(m.speciesId, weather);
+      const setsIt = (m) => m.moves.some((id) => WEATHER_OF[id] === weather) || weatherAbility(m.speciesId, weather, m.chosenAbility);
       return team.some(setsIt) ? null : newest(helping.filter((id) => WEATHER_OF[id] === weather));
     }
     case "speed": {

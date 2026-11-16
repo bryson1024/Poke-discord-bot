@@ -10,6 +10,10 @@
 // when none are picked, and saving that clears the pick. Every fill waits
 // for Save. The picks logic is public/teams/movePicks.js. The server
 // re-checks every rule.
+// Ability (full sim, owner decision 2026-11-16): Automatic (the Battle
+// plan's pick, made before each fight) or one of the species' regular
+// abilities, per team like the moves. Save sends it through
+// POST /api/pokemon/ability, only when it changed.
 // ==========================================================
 
 import { toast, showActionError, showExpired } from "/public/shared/shell.js";
@@ -35,6 +39,36 @@ function ensureDialog() {
   dialog.addEventListener("close", () => lastFocus?.focus?.({ preventScroll: true }));
   document.body.append(dialog);
   return dialog;
+}
+
+async function postAbility(userId, team, s, ability) {
+  const res = await fetch("/api/pokemon/ability", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: userId, team, pokeId: s.id, variant: s.variant, ability, ...(s.uid ? { uid: s.uid } : {}) }),
+  });
+  let body = {};
+  try { body = await res.json(); } catch { /* non-JSON */ }
+  if (res.status === 403) { showExpired(); throw Object.assign(new Error("expired"), { silent: true }); }
+  if (!res.ok || !body.success) throw new Error(body.error || `Couldn't save the ability (${res.status}).`);
+  return body;
+}
+
+// The Ability block: Automatic + each regular ability, or the one it has.
+function abilityBlock(view, team, pick) {
+  if (!view?.options?.length) return "";
+  const t = view.teams[team];
+  if (view.options.length < 2) {
+    const o = view.options[0];
+    return `<div class="tm-ability"><p class="tm-ability-head">Ability</p><p class="tm-ability-only"><b>${esc(o.name)}</b> <span class="tm-sub">${esc(o.desc)} It has only this ability.</span></p></div>`;
+  }
+  const row = (value, title, desc, on) => `<label class="tm-ab${on ? " is-on" : ""}"><input type="radio" name="ability" value="${esc(value)}"${on ? " checked" : ""}>
+    <span><b>${title}</b>${desc ? `<small>${desc}</small>` : ""}</span></label>`;
+  return `<fieldset class="tm-ability"><legend class="tm-ability-head">Ability</legend>
+    ${row("", "Automatic", `Picked for this team's Battle plan before each fight. Right now: <b>${esc(t.automatic ?? "—")}</b>.`, pick == null)}
+    ${view.options.map((o) => row(o.name, esc(o.name), esc(o.desc), pick === o.name)).join("")}
+  </fieldset>`;
 }
 
 async function postMoveset(userId, team, s, moves) {
@@ -80,7 +114,7 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
   const own = s.uid ? line.each?.find((c) => c.uid === s.uid) : null;
   if (s.uid && !own) { dialog.close(); return toast("That Pokémon changed. Reload the page."); }
   const trained = s.uid ? line.trained?.find((t) => t.uid === s.uid) ?? null : null;
-  const copy = own ? { ...line, level: own.level, moves: own.moves, nextMoves: own.nextMoves, learnable: own.learnable, movesets: own.movesets } : line;
+  const copy = own ? { ...line, level: own.level, moves: own.moves, nextMoves: own.nextMoves, learnable: own.learnable, movesets: own.movesets, ability: own.ability ?? line.ability } : line;
   copy.learnable ??= [];
   copy.moves ??= [];
   const other = copy.movesets?.[OTHER[team]];
@@ -88,6 +122,12 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
   // sim: moves from before the switch that its learnset no longer teaches
   // still fight until a new pick is saved, so they show but can't be ticked.
   let picks = startPicks(copy, team);
+  const startMoves = JSON.stringify(savedMoves(picks));
+  // Ability: null = Automatic. Only full-sim servers send copy.ability.
+  const abilityView = copy.ability ?? null;
+  const abilityStart = abilityView?.teams?.[team]?.chosen ?? null;
+  let abilityPick = abilityStart;
+  const canChooseAbility = (abilityView?.options?.length ?? 0) > 1;
   // Only moves it can pick now (the plan view may predate a TM teach).
   const rec = pickFrom(copy, recommended?.moves ?? []).picked;
 
@@ -100,7 +140,7 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
     const lost = lostMoves(picks, copy, team);
     dialog.innerHTML = `
       <div class="tm-moves-head">
-        <div><p class="cc-eyebrow">${esc(LABEL[team])} · Lv ${copy.level}</p><h2 id="movesTitle">${esc(name)}'s moves</h2>
+        <div><p class="cc-eyebrow">${esc(LABEL[team])} · Lv ${copy.level}</p><h2 id="movesTitle">${esc(name)}'s moves${abilityView ? " &amp; ability" : ""}</h2>
           <p class="tm-sub">Pick up to 4 moves it has learned. ${team === "battle" ? "Ranked battles are at Lv 50, but it only knows moves learned by its real Level." : "Used in casual (open) battles."}</p></div>
         <button type="button" class="tm-ib" data-close aria-label="Close">✕</button>
       </div>
@@ -118,13 +158,21 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
           meta: moveMeta(m, { extra: [m.source === "tm" ? "TM" : m.learnedAt ? `Lv ${m.learnedAt}` : "", isStab(m) ? "STAB ×1.5" : ""] }),
         })).join("")}
       </ul>
+      ${abilityBlock(abilityView, team, abilityPick)}
       <p class="tm-sub tm-moves-note">${copy.nextMoves?.length ? `Learns next: ${copy.nextMoves.map((m) => esc(m.name)).join(", ")}. ` : ""}${trained ? `★ Trained copy: ${trained.tmMoves.map((m) => esc(m.name)).join(", ")} learned from TMs.` : ""}</p>
-      <div class="tm-moves-actions"><button type="button" class="cc-btn" data-close>Cancel</button><button type="button" class="cc-btn cc-btn--primary" data-save${canSave(picks) ? "" : " disabled"}>Save moves</button></div>`;
+      <div class="tm-moves-actions"><button type="button" class="cc-btn" data-close>Cancel</button><button type="button" class="cc-btn cc-btn--primary" data-save${canSave(picks) ? "" : " disabled"}>${canChooseAbility ? "Save" : "Save moves"}</button></div>`;
   };
   draw();
   dialog.querySelector("[data-close]")?.focus();
 
   dialog.onchange = (e) => {
+    const radio = e.target.closest('input[name="ability"]');
+    if (radio && !saving) {
+      abilityPick = radio.value || null;
+      draw();
+      dialog.querySelector(`input[name="ability"][value="${CSS.escape(radio.value)}"]`)?.focus();
+      return;
+    }
     const box = e.target.closest('input[type="checkbox"]');
     if (!box || saving) return;
     picks = toggleMove(picks, copy, box.value, box.checked);
@@ -159,19 +207,28 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
     }
     if (e.target.closest("[data-save]")) {
       const clearing = picks.auto;
+      const movesChanged = JSON.stringify(savedMoves(picks)) !== startMoves;
+      const abilityChanged = canChooseAbility && abilityPick !== abilityStart;
       setBusy(true);
       try {
-        const body = await postMoveset(userId, team, s, savedMoves(picks));
+        // Moves as before (also when nothing changed); the ability only when it changed.
+        const bodies = [];
+        if (movesChanged || !abilityChanged) bodies.push(await postMoveset(userId, team, s, savedMoves(picks)));
+        if (abilityChanged) bodies.push(await postAbility(userId, team, s, abilityPick));
         saving = false;
         dialog.close();
         // Success only after the server confirmed; "saved with a delay" when
         // the change is kept in memory but not on disk yet.
-        if (body.saved === false) toast(body.saveNotice || "Saved with a delay. Your change is kept and will be written shortly.");
+        const delayed = bodies.find((b) => b.saved === false);
+        const abilityText = abilityPick ? `${name} uses ${abilityPick} on your ${LABEL[team]}.` : `${name}'s ability is automatic on your ${LABEL[team]}.`;
+        if (delayed) toast(delayed.saveNotice || "Saved with a delay. Your change is kept and will be written shortly.");
+        else if (abilityChanged && !movesChanged) toast(abilityText, { tone: "success" });
+        else if (abilityChanged) toast(`${name}'s moves and ability saved for your ${LABEL[team]}.`, { tone: "success" });
         else toast(clearing ? `${name} uses its automatic moves on your ${LABEL[team]}.` : `${name}'s moves saved for your ${LABEL[team]}.`, { tone: "success" });
         onSaved?.();
       } catch (err) {
         setBusy(false);
-        if (!err.silent) showActionError(err, "Couldn't save the moves");
+        if (!err.silent) showActionError(err, "Couldn't save");
       }
     }
   };

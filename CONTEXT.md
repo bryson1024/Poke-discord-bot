@@ -109,7 +109,7 @@ The strategy a player sets for the **Casual team** or **Ranked team**, such as A
 _Avoid_: strategy, tactic, game plan, playstyle, AI mode
 
 **Ability**:
-A Pokémon's built-in battle trait, such as Levitate or Swift Swim. An ordinary Pokémon fights with whichever of its species' regular abilities best suits its **Team's** **Battle plan**, chosen fresh for each fight; a **Mega form** always has its own. Hidden abilities are never used.
+A Pokémon's built-in battle trait, such as Levitate or Swift Swim. Each **Team** keeps its own choice per Pokémon copy, like its Moveset: **Automatic** (the default) fights with whichever of its species' regular abilities best suits the **Team's** **Battle plan**, chosen fresh for each fight; or the player picks one of its regular abilities. A **Mega form** always has its own. Hidden abilities are never used or offered.
 _Avoid_: trait, passive, skill
 
 **Status condition**:

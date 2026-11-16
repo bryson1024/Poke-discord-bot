@@ -90,18 +90,20 @@ export function setupSuits(speciesId, moveId, env = FULL) {
   return betterAttackStats(speciesId, env).some((s) => boosts[s] > 0) || (boosts.spe > 0 && isSlow(speciesId, env));
 }
 
-const weatherAbilityId = (speciesId) => abilityId(pickAbility(speciesId, "weather") ?? "");
+// The ability it fights with on Weather: the player's choice (chosen), else the plan's pick.
+const weatherAbilityName = (speciesId, chosen = null) => chosen ?? pickAbility(speciesId, "weather") ?? "";
+const weatherAbilityId = (speciesId, chosen = null) => abilityId(weatherAbilityName(speciesId, chosen));
 
 /** The weather the AI plays to for these Pokémon ([{ speciesId }]): the one most of them favor, or null. */
 export function teamWeatherOf(members, env = FULL) {
   return weatherFor(members.filter((m) => getSpecies(m.speciesId, env))
-    .map((m) => ({ types: getSpecies(m.speciesId, env).types, ability: weatherAbilityId(m.speciesId) })));
+    .map((m) => ({ types: getSpecies(m.speciesId, env).types, ability: weatherAbilityId(m.speciesId, m.chosenAbility) })));
 }
 
 /** The ability this Pokémon fights with on Weather, when it sets `weather` (Pelipper's Drizzle), else null. */
-export function weatherAbility(speciesId, weather) {
-  const id = weatherAbilityId(speciesId);
-  return weather && WEATHER_SETTER_ABILITIES.has(id) && WEATHER_FANS[weather].abilities.includes(id) ? pickAbility(speciesId, "weather") : null;
+export function weatherAbility(speciesId, weather, chosen = null) {
+  const id = weatherAbilityId(speciesId, chosen);
+  return weather && WEATHER_SETTER_ABILITIES.has(id) && WEATHER_FANS[weather].abilities.includes(id) ? weatherAbilityName(speciesId, chosen) : null;
 }
 
 /** Does move `id` help `plan` for Team member `m` ({ speciesId, moves })? weather: the Team's. */
@@ -114,7 +116,7 @@ export function moveHelps(id, m, plan, weather, env = FULL) {
 
 /**
  * Does this Team bring what its plan needs? members: [{ speciesId, name?,
- * baseName?, moves }] with the moves each one actually brings. A move counts
+ * baseName?, moves, chosenAbility? }] with the moves each one actually brings. A move counts
  * only when the AI would play it for the plan (moveHelps).
  *   helpers: [{ speciesId, name, moves, ability }], who helps and with what
  *   missing: example moves that would make it ready
@@ -126,7 +128,7 @@ export function planReadiness(members, planId) {
   const weather = plan.id === "weather" ? teamWeatherOf(members) : null;
   if (plan.id === "weather" && !weather) return { ready: false, helpers: [], missing: [], noWeather: true };
   const helpers = members
-    .map((m) => ({ speciesId: m.speciesId, name: m.baseName ?? m.name, moves: (m.moves ?? []).filter((id) => moveHelps(id, m, plan, weather)), ability: weatherAbility(m.speciesId, weather) }))
+    .map((m) => ({ speciesId: m.speciesId, name: m.baseName ?? m.name, moves: (m.moves ?? []).filter((id) => moveHelps(id, m, plan, weather)), ability: weatherAbility(m.speciesId, weather, m.chosenAbility) }))
     .filter((h) => h.moves.length || h.ability);
   const missing = helpers.length ? [] : plan.hint.filter((id) => !weather || WEATHER_OF[id] === weather);
   return { ready: helpers.length > 0, helpers, missing };

@@ -6,7 +6,8 @@
 // sides[i] = { members, plan?, skill? }: built Team members
 // (runBattle.buildTeam and the Challenge / encounter rosters), the Team's
 // Battle plan (default All-out attack) and its AI skill (default Solid).
-// The plan also picks each ordinary member's ability. surge is
+// The plan also picks each ordinary member's ability, unless the player
+// chose one for that team (member.chosenAbility, services/abilities.js). surge is
 // { side, levelMult, statMult? }. ai[i](request, battle, side) overrides
 // side i's chooser (tests and tools).
 // ==========================================================
@@ -28,7 +29,7 @@ export function simulateFull({ sides, seed, surge = null, env = { FULL_SIM_ENABL
   const sets = sides.map((s, i) => s.members
     .map((m, slot) => memberSet(m, {
       slot,
-      ability: pickAbility(m.speciesId, s.plan ?? DEFAULT_PLAN),
+      ability: m.chosenAbility ?? pickAbility(m.speciesId, s.plan ?? DEFAULT_PLAN),
       env,
       ...(surge?.side === i && { levelMult: surge.levelMult, statMult: surge.statMult ?? 1 }),
     }))

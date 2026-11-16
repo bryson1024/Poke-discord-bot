@@ -18,14 +18,16 @@ import { computeStats } from "../utils/battle/stats.js";
 import { chosenMoves } from "../services/movesets.js";
 import { defaultMoves } from "../services/fullSimCutover.js";
 import { getPlan } from "../services/battlePlans.js";
+import { chosenAbility } from "../services/abilities.js";
 import { pickAbility } from "../utils/battle/ai/abilities.js";
 import { isFullSimEnabled } from "../config/fullSim.js";
 import { formatTypesLine } from "./pokedex.js";
 import { threaded } from "../utils/render/renderers.js";
 
 const statLine = (s) => `HP ${s.hp} · Atk ${s.atk} · Def ${s.def} · SpA ${s.spa} · SpD ${s.spd} · Spe ${s.spe}`;
-// Full sim: the ability the Display team's Battle plan picks for it (picked per fight, never stored).
-const planAbility = (user, speciesId) => (isFullSimEnabled() ? pickAbility(speciesId, getPlan(user, "display")) ?? null : null);
+// Full sim: the ability it fights with on the Display team: the player's choice, else the plan's pick (per fight).
+// A chosen Ability on the Casual team (services/abilities.js) wins over the plan's pick.
+const planAbility = (user, speciesId, variant) => (isFullSimEnabled() ? chosenAbility(user, "display", speciesId, variant) ?? pickAbility(speciesId, getPlan(user, "display")) ?? null : null);
 
 // Level, stats at that Level, and moves for each variant the player owns
 // (the Casual team's chosen moveset, else the automatic one; the Ranked
@@ -42,7 +44,7 @@ export function battleInfo(user, speciesId) {
     const moves = names(display ?? defaultMoves(user, { id: speciesId, variant }, level));
     const label = variant === "shiny" ? `✨ shiny Lv ${level}` : `Lv ${level}`;
     const battleLine = battle ? `\nRanked team moves: ${names(battle)}` : "";
-    const ability = planAbility(user, speciesId);
+    const ability = planAbility(user, speciesId, variant);
     return `**Your ${label}** · ${statLine(computeStats(species.baseStats, level))}\nMoves: ${moves}${battleLine}${ability ? `\nAbility: ${ability}` : ""}`;
   }).join("\n\n");
 }
@@ -108,7 +110,7 @@ export function inspectSlots(user, pokemon) {
       const member = { speciesId: id, variant, level: getTraining(user, id, variant).level };
       // Full sim: with none picked, the moves recorded at cutover (the same as automatic with it off).
       member.moves = chosenMoves(user, "display", id, variant) ?? defaultMoves(user, { id, variant }, member.level);
-      const ability = planAbility(user, id);
+      const ability = planAbility(user, id, variant);
       return { ...slotView(user, member, 0), slot: null, ...(ability && { ability }) };
     });
   }

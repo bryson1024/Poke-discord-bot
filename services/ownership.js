@@ -373,8 +373,8 @@ export function normalizeCustomPokemon(user) {
       }
     }
   }
-  // 5. per-copy movesets without a record.
-  for (const team of Object.values(user.movesets ?? {})) {
+  // 5. per-copy movesets and Ability choices without a record.
+  for (const team of [...Object.values(user.movesets ?? {}), ...Object.values(user.abilities ?? {})]) {
     if (!team || typeof team !== "object") continue;
     for (const k of Object.keys(team)) {
       // A copy's own moveset: kept while the copy (any copy) or its TM record exists.
