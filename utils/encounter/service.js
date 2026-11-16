@@ -139,7 +139,7 @@ export function createEncounterService({
         for (const p of picks) {
           const team = teamForPick(user, p);
           byPick[p] = {
-            team: team.map(({ speciesId, variant, megaForm, copyUid }) => ({ speciesId, variant, ...(copyUid && { copyUid }), ...(megaForm && { megaForm }) })),
+            team: team.map(({ speciesId, variant, megaForm, fusionForm, copyUid }) => ({ speciesId, variant, ...(copyUid && { copyUid }), ...(megaForm && { megaForm }), ...(fusionForm && { fusionForm }) })),
             trainer: rollTrainer({ team, seed: s }),
           };
         }

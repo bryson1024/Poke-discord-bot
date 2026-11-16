@@ -17,6 +17,7 @@ import { createCanvas, ImageData, loadImage } from "@napi-rs/canvas";
 import { GifReader } from "omggif";
 import { spriteRecord } from "../sprites.js";
 import { isMegaId, megaSpriteRecord } from "../megas.js";
+import { isFusionSpriteId } from "../fusions.js";
 import { stepCount } from "../trainerIdle.js";
 import { motionStates, poseOf, cardSchedule } from "../trainerMotion.js";
 import { trainerIdle, trainersAnimated, trainerParts } from "../trainerAssets.js";
@@ -82,6 +83,8 @@ async function decodeFirstFrame(file) {
  * placeholder instead).
  */
 export function spriteFileFor(id, variant = "normal") {
+  // Black/White Kyurem: <variant>/646-black.gif (utils/fusions.js).
+  if (isFusionSpriteId(id)) return `sprites/pokemon/${variant === "shiny" || variant === "grayscale" ? variant : "normal"}/${id}.gif`;
   if (isMegaId(id)) {
     const rec = megaSpriteRecord(id)?.[variant];
     return rec?.file ? `sprites/pokemon/mega/${rec.file}` : null;

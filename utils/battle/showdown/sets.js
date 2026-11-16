@@ -36,7 +36,8 @@ export const firstAbility = (speciesName) => dex.species.get(speciesName).abilit
 export function memberSet(member, { slot, levelMult = 1, statMult = 1, ability, env = process.env } = {}) {
   if (member.hpFraction !== undefined && member.hpFraction <= 0) return null;
   const profile = member.battleProfile ?? null;
-  const species = profile ? getMega(profile.formId)?.showdownName ?? getSpecies(member.speciesId, env).name : getSpecies(member.speciesId, env).name;
+  // A Mega's or a fusion's (Black/White Kyurem, utils/fusions.js) Showdown forme.
+  const species = profile ? profile.showdownName ?? getMega(profile.formId)?.showdownName ?? getSpecies(member.speciesId, env).name : getSpecies(member.speciesId, env).name;
   const mult = (member.statMult ?? 1) * statMult;
   return {
     name: `s${slot}`,

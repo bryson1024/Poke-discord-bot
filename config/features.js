@@ -138,3 +138,13 @@ export const heldItemCapabilities = (env = process.env, userId = null) =>
 export function isDashboardFightsEnabled(env = process.env) {
   return TRUE.has(String(env.DASHBOARD_FIGHTS_ENABLED ?? "").trim().toLowerCase());
 }
+
+// ----------------------------------------------------------
+// KYUREM_FUSION_ENABLED: Black Kyurem and White Kyurem (utils/fusions.js).
+// Owning Kyurem plus Zekrom/Reshiram unlocks the form on Kyurem's team slots.
+// Off unless "1"/"true"/"yes"/"on": nobody can pick a form, and a stored
+// form shows and battles as plain Kyurem.
+// ----------------------------------------------------------
+export function isKyuremFusionEnabled(env = process.env) {
+  return TRUE.has(String(env.KYUREM_FUSION_ENABLED ?? "").trim().toLowerCase());
+}

@@ -83,6 +83,7 @@ import { createHeldItemHandlers } from "./services/heldItemsApi.js";
 import { normalizeEquipment, reconcileTeamEquipment, equipmentRev } from "./services/heldItems.js";
 import { normalizeMegaUnlocks } from "./services/megaUnlocks.js";
 import { normalizeDisplayedTeam, prepareTeamSelection } from "./services/megaTeam.js";
+import { fusionView } from "./services/fusionTeam.js";
 import { normalizeBattleTeam, prepareBattleTeamSelection, hasBattleTeam } from "./services/battleTeam.js";
 import { normalizeNotices, peekNotices, clearNotices, NOTICE_KINDS } from "./services/notices.js";
 import { consolidateUserTrainers } from "./services/trainerConsolidation.js";
@@ -2476,6 +2477,7 @@ app.get("/api/user-pokemon", (req, res) => {
     // donate / evolve / shiny craft / Teams. { "6:normal": [{ uid, rev, tmMoves, teams }] }
     trained: trainedSummary(u),
     showcaseTeam: Array.isArray(u.showcaseTeam) ? u.showcaseTeam : [], // three-teams split
+    fusion: fusionView(u), // Black/White Kyurem (utils/fusions.js): on/off + unlocked forms
     // Pokédex (ever caught; never drops): { id: 1 normal | 2 shiny | 3 both }.
     pokedex: u.pokedex ?? {},
     // Collection: every copy, one entry each (docs/adr/0001), for the box grid.
@@ -2530,7 +2532,7 @@ app.get("/api/pokemon/detail", (req, res) => {
 // (level-up at or below its real Level; TMs later). services/movesets.js.
 app.post("/api/pokemon/moveset", express.json({ limit: "4kb" }), async (req, res) => {
   try {
-    const { id, team, pokeId, variant, moves, uid = null } = req.body || {};
+    const { id, team, pokeId, variant, moves, uid = null, form = null } = req.body || {};
     if (!id || pokeId == null) return res.status(400).json({ success: false, error: "Missing id/pokeId" });
     if (!TEAM_TYPES.includes(team)) return res.status(400).json({ success: false, error: "Unknown team type" });
     if (!requireDashboardSession(req, id)) return res.status(403).json({ success: false, error: "Invalid or expired session" });
@@ -2538,7 +2540,8 @@ app.post("/api/pokemon/moveset", express.json({ limit: "4kb" }), async (req, res
       const u = trainerData[id];
       if (!u) return res.status(404).json({ success: false, error: "User not found" });
       // uid: the slot's copy (box copy or TM copy); absent = the line's plain copies.
-      const r = saveMoveset(u, { team, pokeId, variant, moves, uid });
+      // form: Black/White Kyurem on the slot being edited (its own moves; services/movesets.js).
+      const r = saveMoveset(u, { team, pokeId, variant, moves, uid, form: typeof form === "string" ? form : null });
       if (!r.ok) return res.status(r.status ?? 400).json({ success: false, error: r.error, code: r.code });
       const saveAck = await saveAndAck(trainerData);
       return res.json({ ...saveAckFields(saveAck), success: true, team, ...(r.uid && { uid: r.uid }), moves: r.moves });

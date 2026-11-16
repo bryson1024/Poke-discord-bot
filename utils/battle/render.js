@@ -22,6 +22,7 @@ import { trainerLight } from "../render/auraArt.js";
 import { cardTrainerFx } from "../render/trainerTier.js";
 import { typeStyle, COLOR as TOKENS } from "../render/tokens.js";
 import { isMegaId, megaSpriteRecord } from "../megas.js";
+import { getFusion } from "../fusions.js";
 import { encodeFrames } from "../render/gif.js";
 import { unionBox, pokemonLoopFit, loopPlan, fitLoop, spriteTime, STEP_MS, MAX_GIF_BYTES } from "../render/spriteLoops.js";
 import { ANIMATION, hitsTimeline, STAT_LABELS } from "./timeline.js";
@@ -497,7 +498,7 @@ export async function renderBattleFrame({ sides, hpBefore, events = [], badge = 
   const load = (s, i, folder) => {
     const m = sides[s].members[i];
     // A Mega battles with its own sprite (loadAnimatedSprite: mega/<variant|grayscale>/<form>.gif).
-    const id = m.megaForm ?? m.speciesId;
+    const id = m.megaForm ?? (m.fusionForm ? getFusion(m.fusionForm)?.spriteId : null) ?? m.speciesId; // Black/White Kyurem: <folder>/646-black.gif
     const key = m.megaForm ? `mega/${folder}/${id}` : `${folder}/${id}`; // the file's path under sprites/pokemon
     if (!sprites.has(key)) sprites.set(key, loadAnimatedSprite(id, folder));
     return sprites.get(key);

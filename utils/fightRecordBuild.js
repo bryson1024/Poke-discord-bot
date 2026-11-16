@@ -49,6 +49,7 @@ export function memberView(m) {
     moves: memberMoves(m).map(moveName),
     ...(m.item && { item: m.item }),
     ...(m.megaForm && { megaForm: m.megaForm, baseName: m.baseName ?? null }),
+    ...(m.fusionForm && { fusionForm: m.fusionForm, baseName: m.baseName ?? null }), // Black/White Kyurem
     ...(m.hpFraction != null && m.hpFraction !== 1 && { hpFraction: m.hpFraction }),
   };
 }

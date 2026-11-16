@@ -130,6 +130,7 @@ export function opponentAura(key, opponent, env = process.env) {
 export const teamView = (members) => members.map((m) => ({
   speciesId: m.speciesId, variant: m.variant ?? "normal", name: m.name, level: m.level,
   ...(m.megaForm && { megaForm: m.megaForm }),
+  ...(m.fusionForm && { fusionForm: m.fusionForm }),
   ...(m.item && { item: typeof m.item === "string" ? m.item : m.item.id ?? null }),
 }));
 
