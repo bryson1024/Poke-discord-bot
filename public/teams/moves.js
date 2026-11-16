@@ -91,6 +91,9 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
   // Only moves it can pick now (the plan view may predate a TM teach).
   const rec = pickFrom(copy, recommended?.moves ?? []).picked;
 
+  // Same-type attack bonus: a damaging move of one of the Pokémon's own types hits ×1.5.
+  const ownTypes = new Set((d.types ?? []).map((t) => String(t).toLowerCase()));
+  const isStab = (m) => m.category !== "Status" && Number(m.power) > 0 && ownTypes.has(String(m.type ?? "").toLowerCase());
   const draw = () => {
     const ticked = tickedMoves(picks, copy);
     const full = ticked.length >= MAX;
@@ -112,7 +115,7 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
       <ul class="tm-movelist" aria-label="Learned moves">
         ${copy.learnable.map((m) => moveRow(m, {
           on: ticked.includes(m.id), full, recommended: rec.includes(m.id),
-          meta: moveMeta(m, { extra: [m.source === "tm" ? "TM" : m.learnedAt ? `Lv ${m.learnedAt}` : ""] }),
+          meta: moveMeta(m, { extra: [m.source === "tm" ? "TM" : m.learnedAt ? `Lv ${m.learnedAt}` : "", isStab(m) ? "STAB ×1.5" : ""] }),
         })).join("")}
       </ul>
       <p class="tm-sub tm-moves-note">${copy.nextMoves?.length ? `Learns next: ${copy.nextMoves.map((m) => esc(m.name)).join(", ")}. ` : ""}${trained ? `★ Trained copy: ${trained.tmMoves.map((m) => esc(m.name)).join(", ")} learned from TMs.` : ""}</p>

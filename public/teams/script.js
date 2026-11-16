@@ -78,6 +78,8 @@ const state = {
   active: "display",
   error: { showcase: null, display: null, battle: null },
   filter: { q: "", show: "all", sort: "power" },
+  // Team check (POST /api/team-check) for the team on screen: { key, data, open }.
+  check: { key: null, data: null, open: false, failed: false },
   saving: false,
   // Held items (GET /api/held-items). enabled false = no item UI at all.
   held: { enabled: false, items: [], groups: [], rev: 0, teams: { showcase: null, display: null, battle: null } },
@@ -486,7 +488,7 @@ function slotCard(t, s, i) {
   const wasAt = savedList.findIndex((m) => (s.uid && m.uid ? m.uid === s.uid : keyOf(m) === keyOf(s)));
   const change = wasAt === -1 ? "New" : wasAt !== i ? "Moved" : null;
   const lvl = isB
-    ? `<span class="tm-lv tm-lv--fixed" title="Ranked and wager battles use Lv ${BATTLE_LEVEL}"><b>Lv ${BATTLE_LEVEL}</b><small>${fmt(power50Of(s))} power · yours Lv ${levelOf(s)}</small></span>`
+    ? `<span class="tm-lv tm-lv--fixed" title="Ranked and wager battles use Lv ${BATTLE_LEVEL}"><b>Lv ${BATTLE_LEVEL}</b><small title="It fights at Lv ${BATTLE_LEVEL} but knows only the moves learned by its real Level">${fmt(power50Of(s))} power · yours Lv ${levelOf(s)}</small></span>`
     : `<span class="tm-lv"><b>Lv ${levelOf(s)}</b></span>`;
   const tags = [
     i === 0 && !sc ? `<span class="tm-tag tm-tag--lead">Lead</span>` : "",
@@ -523,6 +525,60 @@ function slotCard(t, s, i) {
     </div>
   </li>`;
 }
+
+// ---------- Team check ----------
+const fmtN = (n) => Number(n).toLocaleString("en-US");
+function teamCheckPanel() {
+  const c = state.check;
+  const d = c.data;
+  const summary = d?.headline ? esc(d.headline.text) : d ? "No big shared weakness." : c.failed ? "Couldn't load the team check." : "Checking…";
+  let body = "";
+  if (d) {
+    const rows = [...d.weaknesses].filter((w) => w.weak || w.resist || w.immune)
+      .sort((a, b) => b.weak - a.weak || (a.resist + a.immune) - (b.resist + b.immune)).slice(0, 8);
+    const cell = (n, cls) => `<td class="${n ? cls : "is-zero"}">${n}</td>`;
+    body = `
+      ${d.headline?.tryTypes?.length ? `<p class="tm-check-tip">Types that resist ${esc(d.headline.type)}: ${d.headline.tryTypes.map((x) => `<span class="cc-type" data-type="${esc(x.toLowerCase())}">${esc(x)}</span>`).join(" ")}</p>` : ""}
+      <div class="tm-check-scroll"><table class="tm-check-table">
+        <thead><tr><th scope="row">Attack</th>${rows.map((w) => `<th scope="col"><span class="cc-type" data-type="${esc(w.type.toLowerCase())}">${esc(w.type)}</span></th>`).join("")}</tr></thead>
+        <tbody>
+          <tr><th scope="row">Weak ×2+</th>${rows.map((w) => cell(w.weak, "is-weak")).join("")}</tr>
+          <tr><th scope="row">Resist</th>${rows.map((w) => cell(w.resist, "is-resist")).join("")}</tr>
+          <tr><th scope="row">Immune</th>${rows.map((w) => cell(w.immune, "is-resist")).join("")}</tr>
+        </tbody></table></div>
+      <h4>Moves picked</h4>
+      <p class="tm-check-types">${d.moves.types.map((x) => `<span class="cc-type" data-type="${esc(x.type.toLowerCase())}">${esc(x.type)} ×${x.count}</span>`).join(" ") || "No damaging moves."}</p>
+      <p class="tm-sub">Physical ${d.moves.mix.Physical} · Special ${d.moves.mix.Special} · Status ${d.moves.mix.Status}${d.moves.noSuperEffective.length ? `. Nothing hits ${d.moves.noSuperEffective.map(esc).join(", ")} for ×2.` : ""}</p>
+      <h4>Speed${d.level ? ` at Lv ${d.level}` : ""} (who moves first)</h4>
+      <p class="tm-sub">${d.speed.map((x) => `${esc(x.name)} ${fmtN(x.speed)}`).join(" · ")}</p>
+      <p class="tm-sub tm-check-note">Type matchups only; abilities aren't counted. Includes unsaved changes.</p>`;
+  }
+  return `<details class="tm-check" id="teamCheck"${c.open ? " open" : ""}>
+    <summary><span class="tm-check-title">Team check</span><span class="tm-check-head">${summary}</span></summary>${body}</details>`;
+}
+let checkTimer = null;
+/** Ask the server for the check of the team on screen (debounced; only when the team changed). */
+function scheduleCheck() {
+  const t = state.active;
+  if (isShowcase(t) || !team(t).length) return;
+  const slots = team(t).map((s) => ({ id: s.id, variant: s.variant, ...(s.mega && state.megaOn ? { mega: s.mega } : {}), ...(s.uid ? { uid: s.uid } : {}) }));
+  const key = JSON.stringify([t, slots]);
+  if (key === state.check.key) return;
+  state.check = { ...state.check, key, data: null, failed: false };
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(async () => {
+    try {
+      const r = await fetch("/api/team-check", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: userId, team: t, slots }) });
+      const d = r.ok ? await r.json() : null;
+      if (state.check.key !== key) return; // the team changed meanwhile
+      state.check.data = d;
+      state.check.failed = !d;
+    } catch { if (state.check.key === key) state.check.failed = true; }
+    const el = document.getElementById("teamCheck");
+    if (el) { el.outerHTML = teamCheckPanel(); }
+  }, 250);
+}
+app.addEventListener("toggle", (e) => { if (e.target.id === "teamCheck") state.check.open = e.target.open; }, true);
 
 function rules() {
   const list = team("battle");
@@ -570,7 +626,7 @@ function teamPanel() {
     ? SOURCES[t].filter((o) => team(o).length).map((o) => `<button type="button" class="cc-btn tm-copyteam" data-act="copy" data-team="${t}" data-source="${o}">Copy from ${LABEL[o].replace(" team", "")}</button>`).join("")
     : "";
   return `<section id="teamPanel" class="tm-panel tm-panel--${t} tm-team" role="tabpanel" aria-labelledby="tab-${t}">
-    <div class="tm-panel-head">${head}<div class="tm-copyteams">${copyBtn}</div></div>${note}${isShowcase(t) ? "" : loadoutSummary(t)}${isShowcase(t) ? "" : planRowHtml(t, state.plans)}${body}${err}
+    <div class="tm-panel-head">${head}<div class="tm-copyteams">${copyBtn}</div></div>${note}${isShowcase(t) ? "" : loadoutSummary(t)}${isShowcase(t) ? "" : planRowHtml(t, state.plans)}${body}${err}${isShowcase(t) || !list.length ? "" : teamCheckPanel()}
     <button type="button" class="cc-btn tm-addbtn" data-act="openbox"><svg class="tm-ic" aria-hidden="true"><use href="#tm-plus"/></svg>Add from your box</button>
   </section>`;
 }
@@ -636,7 +692,7 @@ function boxTile(s) {
       <span class="tm-tile-name">${esc(sp.name)}</span>
       ${typeChips(s.id)}
       ${ranked ? `<span class="tm-tile-pw"><b>${fmt(power50Of(s))}</b> at Lv ${BATTLE_LEVEL}</span>` : ""}
-      <span class="tm-tile-lv">${ranked ? "yours " : ""}Lv ${levelOf(s)}${n > 1 ? ` · ×${n}` : ""}${isMythic(s.id) && !blocked ? ` · <b class="tier-text mythic">Mythic</b>` : ""}</span>
+      <span class="tm-tile-lv"${ranked ? ` title="Fights at Lv ${BATTLE_LEVEL}, knows the moves learned by Lv ${levelOf(s)}"` : ""}>${ranked ? "yours " : ""}Lv ${levelOf(s)}${n > 1 ? ` · ×${n}` : ""}${isMythic(s.id) && !blocked ? ` · <b class="tier-text mythic">Mythic</b>` : ""}</span>
     </button>
     <button type="button" class="tm-tile-info" data-act="details-box" data-id="${s.id}" data-variant="${s.variant}" aria-label="${esc(sp.name)}${shiny ? " (shiny)" : ""}: details">i</button></li>`;
 }
@@ -719,6 +775,7 @@ function render() {
   if (new URLSearchParams(location.search).get("team") !== state.active) setUrlParam("team", state.active);
   if (sheet.open) { sheetBody.innerHTML = boxPanel("sheet"); scanFx(sheetBody); }
   scanFx(app); // shiny backdrops (same as the Discord cards)
+  scheduleCheck();
   document.getElementById("boxSheetTitle").textContent = `Add to your ${LABEL[state.active]}`;
   if (focusAfter) {
     const el = [focusAfter].flat().map((s) => document.querySelector(s)).find((x) => x && !x.disabled);

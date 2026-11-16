@@ -485,6 +485,7 @@ import { isFullSimEnabled, markNewPlayer } from "./config/fullSim.js";
 import { settleSimJobs } from "./utils/battle/simPool.js";
 import { showRunResult, challengeNames } from "./utils/battle/playback.js";
 import { powersFromLevels, powersAtRanked, pokemonPower } from "./utils/battle/power.js";
+import { teamCheck } from "./services/teamCheck.js";
 import { modulePreloadPages } from "./utils/modulePreload.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2522,6 +2523,20 @@ app.post("/api/pokemon/moveset", express.json({ limit: "4kb" }), async (req, res
 // TM_ENABLED is set. The client sends ids and the moves it showed; the
 // server re-checks everything and refuses (TM kept) if anything changed.
 // ==========================================================
+// Team check (Teams page): shared weaknesses, move types, speed order for a
+// draft team. Read-only; the draft comes from the page so unsaved edits count.
+// Body: { id, team: "display"|"battle", slots: [{ id, variant, mega?, uid? }] }
+app.post("/api/team-check", express.json({ limit: "4kb" }), (req, res) => {
+  const id = typeof req.body?.id === "string" ? req.body.id : "";
+  if (!/^\d{5,25}$/.test(id)) return res.status(400).json({ error: "Missing or invalid id" });
+  if (!requireDashboardSession(req, id)) return res.status(403).json({ error: "Invalid or expired session" });
+  const user = trainerData[id];
+  if (!user) return res.status(404).json({ error: "User not found" });
+  const r = teamCheck(user, { team: req.body.team, slots: req.body.slots });
+  if (!r.ok) return res.status(r.status ?? 400).json({ error: r.error });
+  return res.json(r.check);
+});
+
 app.get("/api/pokemon/tm-options", (req, res) => {
   const { id, species, variant } = req.query;
   if (!id || species == null) return res.status(400).json({ error: "Missing id/species" });
