@@ -26,11 +26,13 @@ let lastFocus = null;
  */
 export function itemIcon(item, { size = "md", mega = false } = {}) {
   if (mega) {
-    // `mega` may be the slot's Mega Stone placeholder ({ icon, iconSmooth }) or just true.
+    // `mega` may be the slot's Mega Stone placeholder ({ icon, iconSmooth }) or just true;
+    // Black/White Kyurem's DNA Splicers placeholder has no icon, only a glyph.
     const m = typeof mega === "object" ? mega : null;
+    const glyph = m?.glyph ? esc(m.glyph) : "💎";
     const img = m?.icon
       ? `<img class="hi-icon-img${m.iconSmooth ? " is-smooth" : ""}" src="${esc(m.icon)}" alt="" loading="lazy" onerror="this.replaceWith(document.createTextNode('💎'))">`
-      : "💎";
+      : glyph;
     return `<span class="hi-icon hi-icon--${size} hi-icon--mega" aria-hidden="true">${img}</span>`;
   }
   if (!item) return `<span class="hi-icon hi-icon--${size} hi-icon--empty" aria-hidden="true">+</span>`;

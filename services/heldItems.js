@@ -41,6 +41,11 @@ import { getCatalogItem, isHeldItem } from "../catalog/items.js";
 import { STARTER_HELD_ITEMS, STARTER_GRANT_VERSION } from "../catalog/heldItems.js";
 import { getQuantity, grantItem } from "./inventory.js";
 import { megaFieldOf } from "./megaTeam.js";
+import { fusionFieldOf, getFusion } from "../utils/fusions.js";
+
+// Black/White Kyurem (utils/fusions.js): like a Mega's Mega Stone, the fused
+// Kyurem's DNA Splicers fill its item slot, so it holds no regular item.
+const usesItemSlot = (s) => !!(s?.mega || s?.form);
 import { isHeldItemCapabilityEnabled } from "../config/features.js";
 import { getMega } from "../utils/megas.js";
 
@@ -119,7 +124,8 @@ export function teamSlots(user, teamId) {
     if (seen.has(key)) continue;
     seen.add(key);
     const mega = megaFieldOf(t);
-    out.push({ id, variant, ...(uid ? { uid } : {}), ...(mega ? { mega } : {}) });
+    const form = fusionFieldOf(t);
+    out.push({ id, variant, ...(uid ? { uid } : {}), ...(mega ? { mega } : {}), ...(form ? { form } : {}) });
     if (out.length >= 6) break;
   }
   return out;
@@ -142,6 +148,11 @@ export function fitsSpecies(entry, speciesId) {
 
 /** The Mega Stone shown as a virtual placeholder for a Mega slot (display only). */
 export function megaPlaceholder(slot) {
+  // Black/White Kyurem: DNA Splicers (no sprite yet: the dashboard shows a glyph).
+  if (slot?.form && !slot.mega) {
+    const f = getFusion(slot.form);
+    return { formId: slot.form, name: f?.name ?? slot.form, stone: null, stoneName: "DNA Splicers", icon: null, iconSmooth: false, glyph: "🧬", fusion: true };
+  }
   if (!slot?.mega) return null;
   const f = getMega(slot.mega);
   const stone = f?.prerequisite?.kind === "stone" ? f.prerequisite.item : null;
@@ -166,7 +177,7 @@ export function describeLoadout(user, teamId) {
   return slots.map((s) => {
     const line = memberKey(s); // "line" kept as the field name the dashboard sends back
     const item = eq[line] ?? null;
-    return { line, id: s.id, variant: s.variant, ...(s.uid ? { uid: s.uid } : {}), item: s.mega ? null : item, megaSlot: megaPlaceholder(s) };
+    return { line, id: s.id, variant: s.variant, ...(s.uid ? { uid: s.uid } : {}), item: usesItemSlot(s) ? null : item, megaSlot: megaPlaceholder(s) };
   });
 }
 
@@ -205,6 +216,7 @@ export function checkEquip(user, { teamId, line, itemId, move = false }) {
   const entry = heldEntry(itemId);
   if (!entry) return fail(400, "That isn't a held item.", "bad_item");
   if (slot.mega) return fail(409, "This Pokémon is set to Mega Evolve on this team: its Mega Stone uses the item slot.", "mega_slot");
+  if (slot.form) return fail(409, `This Kyurem is ${getFusion(slot.form)?.name ?? "fused"} on this team: its DNA Splicers use the item slot.`, "fusion_slot");
   if (!ownsHeldItem(user, itemId)) return fail(409, `You haven't unlocked ${entry.name} yet.`, "not_owned");
   if (!fitsSpecies(entry, slot.id)) return fail(409, `${entry.name} can't be held by that Pokémon. ${entry.held.rule}`, "wrong_species");
   if (current === itemId) return { ok: true, slot, entry, from: null, replaced: null, unchanged: true };
@@ -255,6 +267,7 @@ export function reconcileTeamEquipment(user, teamId) {
     else if (typeof item !== "string" || !heldEntry(item)) drop(line, "unknown_item");
     else if (!member) drop(line, "not_member");
     else if (member.mega) drop(line, "mega_slot");
+    else if (member.form) drop(line, "fusion_slot");
     else if (!ownsHeldItem(user, item)) drop(line, "not_owned");
     else if (!fitsSpecies(heldEntry(item), member.id)) drop(line, "wrong_species");
     else if (used.has(item)) drop(line, "item_clause");
@@ -301,7 +314,7 @@ export function normalizeEquipment(user) {
     }
     if (!EDITABLE_TEAMS.includes(teamId)) continue; // a future team: keep as stored
     for (const r of reconcileTeamEquipment(user, teamId)) {
-      if (r.reason !== "not_member" && r.reason !== "mega_slot") quarantine(`teams.${teamId}.${r.line}`, r.item, r.reason);
+      if (r.reason !== "not_member" && r.reason !== "mega_slot" && r.reason !== "fusion_slot") quarantine(`teams.${teamId}.${r.line}`, r.item, r.reason);
       else removed.push({ key: `teams.${teamId}.${r.line}`, reason: r.reason });
     }
   }
@@ -324,7 +337,7 @@ export function battleItems(user, teamId, { env = process.env } = {}) {
   for (const s of slots) {
     const key = memberKey(s);
     const item = eq[key] ?? (s.uid ? eq[lineKey(s.id, s.variant)] : undefined); // older per-line key, first slot only (Item Clause)
-    if (!item || s.mega || used.has(item)) continue;
+    if (!item || usesItemSlot(s) || used.has(item)) continue;
     const entry = heldEntry(item);
     if (!entry || !ownsHeldItem(user, item) || !fitsSpecies(entry, s.id)) continue;
     used.add(item);

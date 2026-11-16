@@ -177,6 +177,35 @@ section("Black/White Kyurem uses the team's one Mega slot");
   assertTrue(F.resolveSlotFusion(u, BLACK, [BLACK], { env: ON, megaActive: false })?.ok, "no active Mega → fights as Black Kyurem");
 }
 
+section("DNA Splicers fill a fused Kyurem's item slot (like a Mega Stone)");
+{
+  const H = await import("../services/heldItems.js");
+  const { HELD_ITEM_IDS } = await import("../catalog/heldItems.js");
+  const item = HELD_ITEM_IDS[0];
+  const HELD = { HELD_ITEMS_ENABLED: "1", HELD_ITEMS_BATTLES_ENABLED: "1", ...ON };
+  const u = player();
+  normalizeBox(u);
+  u.items = { [item]: 1 };
+  u.displayedPokemon = [{ id: 646, variant: "normal" }, { id: 6, variant: "normal" }];
+  normalizeDisplayedTeam(u);
+  const line = (s) => (s.uid ? `u:${s.uid}` : `${s.id}:${s.variant}`);
+  const kyuremKey = line(u.displayedPokemon[0]);
+  assertTrue(H.applyEquip(u, { teamId: "display", line: kyuremKey, itemId: item }).ok, "plain Kyurem can hold an item");
+  u.displayedPokemon[0].form = "kyurem-black"; // team saved as Black Kyurem
+  const removed = H.reconcileTeamEquipment(u, "display");
+  assertEqual(removed.map((r) => r.reason), ["fusion_slot"], "saving Black Kyurem clears its item (fusion_slot)");
+  const again = H.checkEquip(u, { teamId: "display", line: kyuremKey, itemId: item });
+  assertEqual(again.code, "fusion_slot", "can't equip an item on Black Kyurem");
+  assertTrue(/DNA Splicers/.test(again.error), "message names DNA Splicers");
+  const lo = H.describeLoadout(u, "display");
+  assertTrue(lo[0].item === null && lo[0].megaSlot?.fusion && lo[0].megaSlot.stoneName === "DNA Splicers", "loadout shows DNA Splicers in the slot");
+  assertTrue(!lo[1].megaSlot, "other members unaffected");
+  u.equipment.teams.display = { [kyuremKey]: item }; // stored past the rule somehow
+  assertTrue(!H.battleItems(u, "display", { env: HELD }).has(kyuremKey), "battle: a fused slot never fights with a regular item");
+  const n = H.normalizeEquipment(u);
+  assertTrue(!(u.equipmentLegacy ?? []).length && n.removed.some((r) => r.reason === "fusion_slot"), "load repair drops it without quarantine");
+}
+
 section("form moves: equippable only while Kyurem uses that form");
 {
   const M = await import("../services/movesets.js");

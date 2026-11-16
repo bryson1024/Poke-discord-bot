@@ -168,7 +168,15 @@ function itemControls(t, s, i, name) {
   if (!state.held.enabled) return { badge: "", button: "" };
   const megaDraft = !!(s.mega && state.megaOn);
   const entry = loadoutOf(t, s);
-  if (megaDraft || entry?.megaSlot) {
+  // Black/White Kyurem: its DNA Splicers fill the item slot (like a Mega Stone).
+  if (fusionOf(s) || (entry?.megaSlot?.fusion && s.form)) {
+    const ph = entry?.megaSlot?.fusion ? entry.megaSlot : { glyph: "🧬", fusion: true };
+    return {
+      badge: `<span class="hi-badge" title="DNA Splicers: the fusion uses this item slot">${itemIcon(null, { size: "sm", mega: ph })}</span>`,
+      button: `<span class="hi-slotbtn is-mega" title="${esc(fusionOf(s)?.name ?? "Black/White Kyurem")} holds DNA Splicers on this team">${itemIcon(null, { size: "xs", mega: ph })} DNA Splicers</span>`,
+    };
+  }
+  if (megaDraft || (entry?.megaSlot && !entry.megaSlot.fusion)) {
     const stone = entry?.megaSlot?.stoneName ?? "Mega Stone";
     return {
       badge: `<span class="hi-badge" title="${esc(stone)}: Mega Evolution uses this item slot">${itemIcon(null, { size: "sm", mega: entry?.megaSlot ?? true })}</span>`,
@@ -191,13 +199,14 @@ function loadoutSummary(t) {
   if (!state.held.enabled || !(state.saved[t] ?? []).length) return "";
   const lo = state.held.teams[t] ?? [];
   const held = lo.filter((m) => m.item).length;
-  const mega = lo.filter((m) => m.megaSlot).length;
-  const open = lo.length - held - mega;
+  const mega = lo.filter((m) => m.megaSlot && !m.megaSlot.fusion).length;
+  const splicers = lo.filter((m) => m.megaSlot?.fusion).length; // Black/White Kyurem
+  const open = lo.length - held - mega - splicers;
   const ids = lo.map((m) => m.item).filter(Boolean);
   const valid = new Set(ids).size === ids.length;
   return `<div class="hi-summary" role="status">
     <div class="hi-summary-icons" aria-hidden="true">${lo.map((m) => itemIcon(heldItem(m.item), { size: "sm", mega: m.megaSlot ?? false })).join("")}</div>
-    <p><b>Items ${held}/${lo.length}</b>${mega ? ` · ${mega} Mega Stone` : ""}${open ? ` · ${open} empty` : " · every slot equipped"} · ${valid ? "✓ all different" : "⚠ duplicate item"}</p>
+    <p><b>Items ${held}/${lo.length}</b>${mega ? ` · ${mega} Mega Stone` : ""}${splicers ? " · DNA Splicers" : ""}${open ? ` · ${open} empty` : " · every slot equipped"} · ${valid ? "✓ all different" : "⚠ duplicate item"}</p>
     <p class="hi-summary-note">Items are permanent unlocks: one unlock works on every team, but only one Pokémon per team can hold it.</p>
   </div>`;
 }
@@ -496,7 +505,8 @@ async function save() {
       state.copied[t] = null;
       if (body.saveDelayed || body.saved === false) toast(body.notice || "Saved with a delay. Your change is kept and will be written shortly.");
       if (Array.isArray(body.itemsCleared) && body.itemsCleared.length) {
-        const why = body.itemsCleared.some((c) => c.reason === "mega_slot") ? " (Mega Evolution uses the item slot)" : "";
+        const why = body.itemsCleared.some((c) => c.reason === "mega_slot") ? " (Mega Evolution uses the item slot)"
+          : body.itemsCleared.some((c) => c.reason === "fusion_slot") ? " (Black/White Kyurem's DNA Splicers use the item slot)" : "";
         toast(`${body.itemsCleared.length} item${body.itemsCleared.length > 1 ? "s" : ""} came off your ${LABEL[t]}${why}. Your unlocks are kept.`);
       }
     }

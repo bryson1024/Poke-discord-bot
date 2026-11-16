@@ -10,6 +10,8 @@
 // ==========================================================
 
 process.env.KYUREM_FUSION_ENABLED = "1";
+process.env.HELD_ITEMS_ENABLED = "1"; // held items: DNA Splicers fill a fused Kyurem's item slot
+process.env.HELD_ITEMS_BATTLES_ENABLED = "1";
 process.env.FULL_SIM_ENABLED = "1"; // production engine (all four form moves)
 
 import express from "express";
@@ -24,6 +26,9 @@ import { prepareBattleTeamSelection, normalizeBattleTeam } from "../../services/
 import { prepareShowcaseSelection } from "../../services/showcaseTeam.js";
 import { fusionView } from "../../services/fusionTeam.js";
 import { teamCheck } from "../../services/teamCheck.js";
+import { createHeldItemHandlers, createRateLimiter } from "../../services/heldItemsApi.js";
+import { reconcileTeamEquipment, equipmentRev } from "../../services/heldItems.js";
+import { lockUser } from "../../utils/userLocks.js";
 import { pokemonDetail } from "../../services/pokemonDetail.js";
 import { saveMoveset } from "../../services/movesets.js";
 
@@ -47,7 +52,11 @@ const app = express();
 app.use("/public", express.static(path.join(ROOT, "public"), { etag: false, maxAge: 0 }));
 app.get("/public/teams", (_, res) => res.sendFile(path.join(ROOT, "public", "teams", "index.html")));
 app.get("/api/mega", (_, res) => res.json({ success: true, enabled: false }));
-app.get("/api/held-items", (_, res) => res.json({ enabled: false }));
+const api = createHeldItemHandlers({ getTrainerData: () => ({ [ID]: u }), lockUser, save: async () => ({ saved: true, note: "" }), getEnv: () => process.env, allowWrite: createRateLimiter({ max: 1000 }) });
+app.get("/api/held-items", (req, res) => { const { status, body } = api.view({ query: req.query, isAuthorized: () => true }); res.status(status).json(body); });
+for (const [route, fn] of [["claim-starter", api.claimStarter], ["equip", api.equip]]) {
+  app.post(`/api/held-items/${route}`, express.json({ limit: "4kb" }), async (req, res) => { const { status, body } = await fn({ body: req.body ?? {}, isAuthorized: () => true }); res.status(status).json(body); });
+}
 app.get("/api/live-events", (_, res) => res.json({ events: [] }));
 app.get("/api/battle/enabled", (_, res) => res.json({ enabled: false }));
 app.get("/api/battle-plans", (_, res) => res.json({ enabled: false }));
@@ -65,7 +74,8 @@ app.post("/api/set-pokemon-team", express.json(), (req, res) => {
   if (teamType === "showcase") u.showcaseTeam = r.team;
   else if (teamType === "battle") u.battleTeam = r.team;
   else u.displayedPokemon = r.team;
-  res.json({ success: true, saved: true });
+  const itemsCleared = teamType === "showcase" ? [] : reconcileTeamEquipment(u, teamType);
+  res.json({ success: true, saved: true, currentTeam: u.displayedPokemon, battleTeam: u.battleTeam, showcaseTeam: u.showcaseTeam, ...(itemsCleared.length ? { itemsCleared, equipmentRev: equipmentRev(u) } : {}) });
 });
 app.get("/api/pokemon/detail", (req, res) => { const { status, body } = pokemonDetail(u, req.query.species); res.status(status).json(body); });
 app.post("/api/pokemon/moveset", express.json(), (req, res) => {
