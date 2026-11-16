@@ -10,7 +10,8 @@
 import { getSpeciesEntry, isGenerationLive } from "../utils/speciesCatalog.js";
 import { getSpecies, getMove, TYPE_ID_TO_NAME } from "../utils/battle/data.js";
 import { computeStats } from "../utils/battle/stats.js";
-import { autoMoveset, movesLearned } from "../utils/battle/moveset.js";
+import { movesLearned } from "../utils/battle/moveset.js";
+import { defaultMoves } from "./fullSimCutover.js";
 import { getTraining } from "../utils/training.js";
 import { slotView } from "../utils/render/teamView.js";
 import { displaySpeciesName } from "../utils/render/names.js";
@@ -23,6 +24,7 @@ import { learnableMoves, chosenMoves, moveInfo as movesetMoveInfo } from "./move
 import { customCopiesOf, plainCount } from "./ownership.js";
 import { isTmEnabled } from "../config/tmFeatures.js";
 import { copiesOf } from "./box.js";
+import { tmMovesForSpecies } from "../utils/battle/tmData.js";
 
 const sum = (s) => (s ? s.hp + s.atk + s.def + s.spa + s.spd + s.spe : null);
 const nameOf = (id) => displaySpeciesName(id, getSpeciesEntry(id)?.name);
@@ -67,6 +69,28 @@ function trainedCopies(user, id, variant, level) {
 }
 
 /**
+ * Every move the species can learn, for the Pokédex: level-up moves (the
+ * earliest Level each is learned at, Level order) and, while TMs are on,
+ * the TMs it can be taught ("launch" moves, the ones Teach a TM offers).
+ * Same move data as the battle (utils/battle/data.js).
+ */
+export function speciesLearnset(id, { env = process.env } = {}) {
+  const species = getSpecies(id);
+  if (!species) return { levelUp: [], tm: [] };
+  const seen = new Set();
+  const levelUp = [];
+  for (const [at, moveId] of species.levelMoves ?? []) {
+    if (seen.has(moveId) || !getMove(moveId)) continue;
+    seen.add(moveId);
+    levelUp.push({ ...moveInfo(moveId), learnedAt: at });
+  }
+  const tm = isTmEnabled(env)
+    ? tmMovesForSpecies(id, { status: "launch" }).filter((m) => getMove(m)).map(moveInfo).sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+  return { levelUp, tm };
+}
+
+/**
  * @returns {{ status: number, body: object }}
  *   404 when the species is unknown, or not in a live generation and not owned.
  */
@@ -95,7 +119,7 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
       power: v.statTotal,
       stats50,
       power50: sum(stats50),
-      moves: species ? autoMoveset(id, level).map(moveInfo) : [], // the automatic moveset (slotView uses the same function)
+      moves: species ? defaultMoves(user, { id, variant }, level).map(moveInfo) : [], // the moves it fights with when none are picked (slotView agrees)
       // Chosen movesets per team (null = automatic) and every move it may equip.
       movesets: {
         display: chosenMoves(user, "display", id, variant)?.map(movesetMoveInfo) ?? null,
@@ -110,18 +134,27 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
       trained: species ? trainedCopies(user, id, variant, level) : [],
       // Every copy is its own Pokémon (docs/adr/0001): its Level, the moves
       // it may equip there, and its own moveset on each team.
-      each: species ? copiesOf(user, id, variant).map((c) => ({
+      // A copy's details drawer (Teams slot, Collection box tile) shows these:
+      // what that copy fights with on each team (movesets ?? moves).
+      each: species ? copiesOf(user, id, variant).map((c) => {
+        const cv = slotView(user, { speciesId: id, variant, level: c.level, copyUid: c.uid }, 0);
+        return {
         uid: c.uid,
         level: c.level,
         trained: c.trained,
-        moves: autoMoveset(id, c.level).map(moveInfo),
+        expFrac: cv.expFrac,
+        stats: cv.stats,
+        power: cv.statTotal,
+        teams: copySlots(user, c.uid),
+        moves: defaultMoves(user, { id, variant, uid: c.uid }, c.level).map(moveInfo),
         nextMoves: movesLearned(id, c.level, Math.min(100, c.level + 20)).map(moveInfo),
         learnable: learnableMoves(user, id, variant, { uid: c.uid }).map((m) => ({ ...movesetMoveInfo(m.id), learnedAt: m.learnedAt, source: m.source })),
         movesets: {
           display: chosenMoves(user, "display", id, variant, { uid: c.uid })?.map(movesetMoveInfo) ?? null,
           battle: chosenMoves(user, "battle", id, variant, { uid: c.uid })?.map(movesetMoveInfo) ?? null,
         },
-      })) : [],
+        };
+      }) : [],
     };
   }
 
@@ -152,6 +185,8 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
       owned: counts,
       copies,
       megaForms,
+      // Pokédex: every move it can learn (level-up with Levels, TMs).
+      learnset: speciesLearnset(id, { env }),
       // TM system (T4): whether "Teach a TM" is offered (TM_ENABLED).
       tm: { enabled: isTmEnabled(env) },
     },

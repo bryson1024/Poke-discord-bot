@@ -19,6 +19,7 @@ import { blockRematch, isRematchBlocked } from "../utils/battle/rematch.js";
 import { PLAYBACK } from "../utils/battle/tuning.js";
 import { GifReader } from "omggif";
 import { portraitBox, FRAME_WIDTH } from "../utils/battle/render.js";
+import { registerHooks } from "module";
 
 PLAYBACK.delayMs = 0;
 
@@ -111,21 +112,38 @@ function harness({ sendFails = false, perms = true, offeredReplyFails = false, f
 
 const replaceRecord = (t, id) => ensureUserInitialized(id, id, t.trainerData, null); // e.g. /daily or a dashboard save
 
-section("The battle channel");
+section("The casual channel, past the Battle cap");
 {
-  // CASUAL_BATTLE_CHANNEL_ID keeps casual /battle in one channel; unset, it works anywhere (every other section).
+  // CASUAL_BATTLE_CHANNEL_ID: past the Battle cap, a casual battle runs only there.
+  // Within the cap, and unset (every other section), casual battles work anywhere.
+  const day = utcDay(new Date());
   process.env.CASUAL_BATTLE_CHANNEL_ID = "elsewhere";
-  const t = harness();
-  await t.run("A", "B");
-  assertEqual(t.log.replies, ["Casual battles happen in <#elsewhere>. Ranked and wager battles work anywhere."], "a casual battle outside it is refused privately");
-  assertEqual([t.log.messages.length, t.log.edits.length, t.trainerData.A.battles], [0, 0, undefined], "nothing posted or counted");
+  const within = harness();
+  await within.run("A", "B");
+  assertTrue(within.log.replies.length === 0 && within.log.edits[0]?.startsWith("⚔️ Your battle is starting below."), "within the cap, a casual battle runs anywhere");
+
+  const daily = harness();
+  getBattleRecord(daily.trainerData.A, day).started = 10;
+  await daily.run("A", "B");
+  assertEqual(daily.log.replies, ["You've used all 10 battles for today. Casual battles past that earn no EXP and happen in <#elsewhere>."], "past the daily cap, it's refused privately");
+  assertEqual([daily.log.messages.length, daily.log.edits.length, getBattleRecord(daily.trainerData.A, day).vs.B ?? 0], [0, 0, 0], "nothing posted or counted");
+
+  const vs = harness();
+  getBattleRecord(vs.trainerData.A, day).vs.B = 3;
+  await vs.run("A", "B");
+  assertEqual(vs.log.replies, ["You've battled <@B> 3 times today. More casual battles with them need a Rematch request in <#elsewhere>."], "past 3 against them, the Rematch request is refused too");
+  assertEqual(vs.log.messages.length, 0, "no Rematch request is posted");
+
   const w = harness();
+  getBattleRecord(w.trainerData.A, day).started = 10;
   await w.run("A", "B", 50);
-  assertTrue(w.log.replies.length === 0 && w.log.messages.length === 1, "a wager offer still posts anywhere");
+  assertTrue(!w.log.replies.some((r) => r?.includes("<#elsewhere>")), "ranked and wager refusals don't point to the casual channel");
+
   process.env.CASUAL_BATTLE_CHANNEL_ID = "chan";
   const home = harness();
+  getBattleRecord(home.trainerData.A, day).started = 10;
   await home.run("A", "B");
-  assertTrue(home.log.edits[0]?.startsWith("⚔️ Your battle is starting below."), "in the battle channel, the battle runs");
+  assertTrue(home.log.edits[0]?.includes("so this one earns no EXP"), "in the casual channel, it runs with no EXP");
   delete process.env.CASUAL_BATTLE_CHANNEL_ID;
 }
 
@@ -437,6 +455,61 @@ section("Missing channel permissions");
   await t.run("A", "B", 50);
   assertEqual(t.log.replies.length, 2, "both modes are refused up front");
   assertEqual([t.trainerData.A.cc, t.trainerData.A.battle], [100, null], "nothing is held or recorded");
+}
+
+section("A wager fight that fails returns both Stakes (review I4)");
+{
+  // The full sim, swapped for one that always throws (as tests/fightFailure.test.js
+  // does), run inline: the fight fails the way a crashed sim worker would.
+  registerHooks({
+    load(url, context, next) {
+      if (url.endsWith("/utils/battle/showdown/simulate.js")) {
+        return { format: "module", shortCircuit: true, source: 'export function simulateFull() { throw new Error("test: the sim failed"); }' };
+      }
+      return next(url, context);
+    },
+  });
+  process.env.FULL_SIM_ENABLED = "1";
+  process.env.SIM_THREADS = "0";
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const t = harness();
+    await t.run("A", "B", 50);
+    const click = t.button("B", `wager_accept:${t.trainerData.A.pendingWager.nonce}`);
+    await t.collectors[0].h.collect(click);
+    assertEqual([t.trainerData.A.cc, t.trainerData.B.cc, t.trainerData.A.pendingWager], [100, 100, null], "both players get their Stake back");
+    assertEqual(t.log.messages.length, 1, "no battle is posted");
+    assertTrue(t.log.messages[0].edits.at(-1)?.content.includes("couldn't run"), "the offer says the fight couldn't run");
+  } finally {
+    console.warn = warn;
+    delete process.env.FULL_SIM_ENABLED;
+    delete process.env.SIM_THREADS;
+  }
+}
+
+section("A Rematch fight that fails closes the request and counts nothing");
+{
+  // The same always-failing sim as above (the hook stays registered).
+  process.env.FULL_SIM_ENABLED = "1";
+  process.env.SIM_THREADS = "0";
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const t = harness();
+    atLimit(t);
+    await t.run("A", "B");
+    const [request] = t.log.messages;
+    await t.collectors[0].h.collect(t.button("B", `rematch_accept:${requestNonce(t)}`));
+    assertEqual(request.edits.at(-1), { content: "Rematch canceled. The fight couldn't run.", components: [] }, "the request says the fight couldn't run");
+    assertEqual(t.log.messages.length, 1, "no battle is posted");
+    assertEqual([t.trainerData.A.rematchRequests, t.trainerData.A.battle.vs.B], [undefined, 3], "the request is settled and no battle is counted");
+    assertTrue(!isRematchBlocked(t.trainerData.A, "B", today()), "nobody is blocked from asking again");
+  } finally {
+    console.warn = warn;
+    delete process.env.FULL_SIM_ENABLED;
+    delete process.env.SIM_THREADS;
+  }
 }
 
 console.log = quiet;

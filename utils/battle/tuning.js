@@ -79,6 +79,41 @@ export const CHALLENGE = {
 // tests turns kept the 2 s pace with up to 5 at once and slipped at 6; a Fly
 // shared CPU is about half as fast, so 2 keeps a margin.
 export const PLAYBACK = { maxUpdates: 12, delayMs: 2000, maxAtOnce: 2 };
+// Full sim (FULL_SIM_ENABLED): a full-sim replay gets more updates, since
+// its turns carry status, hazards and switches as well as hits.
+// challengeStatBoost: CHALLENGE.statBoost on the full sim, per Challenge
+// opponent. Every one of them is an Expert there (catalog/opponentPlans.js),
+// so each Challenge gets the hidden boost that brings its gate Level back
+// to today's: `node tools/challenge-gates.mjs <key> --target <today's gate>`
+// (2026-11-12, n 200), checked by tests/fullSimChallengeBalance.slow.js.
+// Lt. Surge and Giovanni come out above 1.1: they were easier on the full
+// sim even as Experts. The Elite Four is the exception (owner decision,
+// 2026-11-12): its gate is Lv 70 rather than today's 73, so its boost is
+// just under 1 (`--target 70`, 1437 s).
+// mythicStatBoost (owner decision, 2026-11-14): the Elite Four, Blue and
+// Red's boost against a Team with 3 or more mythic-tier Pokémon; 1 and 2
+// mythics move a third and two thirds of the way from challengeStatBoost
+// (utils/challenge/runChallenge.js). Without it, 3 mythics cleared them about
+// 10 Levels lower than none (Elite Four 70 to 60, Blue 79 to 69, Red 90 to
+// 80). Each value puts 3 mythics 5 Levels lower:
+// `node tools/challenge-gates.mjs <key> --target <gate − 5> --mythics 3`
+// (2026-11-14, n 200; Elite Four 2440 s), checked by
+// tests/fullSimMythicBalance.slow.js.
+const ELITE_FOUR = 0.99;
+const ELITE_FOUR_MYTHIC = 1.09;
+export const FULL_SIM = {
+  maxUpdates: 20,
+  challengeStatBoost: Object.freeze({
+    brock: 1.08, misty: 1.07, surge: 1.17, erika: 1.04, koga: 1.09, sabrina: 1.05, blaine: 1.05, giovanni: 1.12,
+    lorelei: ELITE_FOUR, bruno: ELITE_FOUR, agatha: ELITE_FOUR, lance: ELITE_FOUR,
+    blue: 1.07, red: 1.04,
+  }),
+  mythicStatBoost: Object.freeze({
+    lorelei: ELITE_FOUR_MYTHIC, bruno: ELITE_FOUR_MYTHIC, agatha: ELITE_FOUR_MYTHIC, lance: ELITE_FOUR_MYTHIC,
+    blue: 1.15, red: 1.1,
+  }),
+  mythicCap: 3,
+};
 // Trainer encounters (docs/superpowers/specs/2026-11-10-trainer-encounters-design.md;
 // every value decided 2026-11-10 unless dated). chance (1.5%, decided
 // 2026-11-11): per message that earns TP, after a miss on the catch roll. gapMs and perDay count every posted card, run

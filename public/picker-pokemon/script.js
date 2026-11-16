@@ -139,9 +139,11 @@ function tierOf(p) {
 
 // Released generations (GET /api/pokedex-status). Defaults to Gens 1–5.
 let releasedGenerations = new Set([1, 2, 3, 4, 5]);
+// Started by init() together with the other loads (one round trip, not three in a row).
+let pokedexStatusP = null;
 async function limitToReleasedGenerations(data, owned) {
   try {
-    const res = await fetch("/api/pokedex-status", { credentials: "same-origin" });
+    const res = await (pokedexStatusP ?? fetch("/api/pokedex-status", { credentials: "same-origin" }));
     if (res.ok) {
       const body = await res.json();
       if (Array.isArray(body.liveGenerations)) releasedGenerations = new Set(body.liveGenerations.map(Number));
@@ -868,7 +870,8 @@ function onBoxTileClick(c, locked) {
     }
     return showBlockedActionModal(c.id);
   }
-  if (currentMode === "browse") return openDetail(c.id, detailContext());
+  // This copy's details: its Level, stats and equipped moves on each team.
+  if (currentMode === "browse") return openDetail(c.id, detailContext(), { variant: c.shiny ? "shiny" : "normal", uid: c.uid });
   if (currentMode === "evolve") return openEvolutionModal(c.id);
   if (currentMode === "donate") return openDonationConfirmModal(c.id, c.shiny ? "shiny" : "normal");
   if (currentMode === "convert") return openConvertModal(c.id);
@@ -1377,7 +1380,9 @@ async function init() {
       return;
     }
 
-    // Load Pokemon data
+    // Load everything at once: Pokémon data, the player, released generations.
+    pokedexStatusP = fetch("/api/pokedex-status", { credentials: "same-origin" }).catch(() => null);
+    const userP = fetchUserData().then(() => null, (err) => err);
     const pokeRes = await fetch("/public/pokemonData.json", { credentials: "same-origin" });
     if (!pokeRes.ok) throw new Error("Couldn't load the Pokédex. Please refresh the page.");
     pokemonData = await pokeRes.json();
@@ -1389,9 +1394,9 @@ async function init() {
     }
 
     // Load user data (cookie session; backend will 403 if invalid)
-    try {
-      await fetchUserData();
-    } catch (err) {
+    const userErr = await userP;
+    if (userErr) {
+      const err = userErr;
       setGridMessage("");
       if (err?.status === 403) showExpired();
       else showBanner(err?.message || "Couldn't load your Pokémon. Please try again.", { title: "Couldn't load your Pokémon" });
@@ -1421,7 +1426,7 @@ async function init() {
     // opens that Pokémon's details on that copy.
     const linked = Number(params.get("pokemon"));
     if (Number.isInteger(linked) && pokemonData[linked]) {
-      openDetail(linked, detailContext(), { variant: params.get("variant") === "shiny" ? "shiny" : "normal" });
+      openDetail(linked, detailContext(), { variant: params.get("variant") === "shiny" ? "shiny" : "normal", uid: params.get("copy") || null });
     }
 
     // Filters
