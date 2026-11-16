@@ -412,8 +412,14 @@ section("Route guards");
   blocked = null;
   const ok = await post("/api/admin/change", grant, { cookie: "admin_session=good", origin: base });
   assertTrue(ok.status === 200 && td[1].cc === 1005, "a same-site session write goes through");
-  const pl = await (await fetch(`${base}/api/admin/player/1`, { headers: { cookie: "admin_session=good" } })).json();
+  // A player who owns Pokémon: the per-copy list once crashed on a name clash (copiesOf).
+  td[1].pokemon = { 25: { normal: 2, shiny: 0 } };
+  td[1].box = { c_aaaaaaaaaa: { id: 25, exp: 0 }, c_bbbbbbbbbb: { id: 25, exp: 0 } };
+  const plRes = await fetch(`${base}/api/admin/player/1`, { headers: { cookie: "admin_session=good" } });
+  assertEqual(plRes.status, 200, "player view loads for a player who owns Pokémon");
+  const pl = await plRes.json();
   assertTrue(pl.ok && pl.player.cc === 1005 && Array.isArray(pl.pokemon) && pl.cooldowns.length === 5, "player view is shaped for the page");
+  assertTrue(pl.pokemon.length === 1 && pl.pokemon[0].copies.length === 2, "a player's Pokémon list each copy");
   const cat = await (await fetch(`${base}/api/admin/catalog`, { headers: { cookie: "admin_session=good" } })).json();
   assertTrue(cat.species.some((s) => s.id === 25 && s.released) && cat.species.some((s) => s.id === UNRELEASED && !s.released) && cat.items.every((i) => i.id !== "pokeball") && cat.trainers.length > 100, "catalog marks unreleased Pokémon and lists only bag items");
   const byId = new Map(cat.items.map((i) => [i.id, i]));
