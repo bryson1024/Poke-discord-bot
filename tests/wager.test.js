@@ -4,7 +4,7 @@
 // ==========================================================
 
 import { assertEqual, assertTrue, section, finish } from "./harness.js";
-import { offerWager, attachMessage, refundWager, acceptStake, refundAllPending } from "../utils/battle/wager.js";
+import { offerWager, attachMessage, refundWager, acceptStake, refundAllPending, settleStake, refundAccepted } from "../utils/battle/wager.js";
 
 const NOW = 1_800_000_000_000;
 const user = (id, cc) => ({ id, cc });
@@ -34,8 +34,33 @@ section("Accept");
   assertEqual(acceptStake(a, b, "nope", NOW), { ok: false, reason: "no_wager" }, "nonce must match");
   assertEqual(acceptStake(a, b, "n1", NOW + 15 * 60 * 1000 + 1), { ok: false, reason: "expired" }, "expired after 15 minutes");
   assertEqual(acceptStake(a, b, "n1", NOW + 1000), { ok: true, stake: 100, refunded: 0 }, "full accept");
-  assertEqual([a.cc, b.cc, a.pendingWager], [400, 200, null], "both Stakes held, pending cleared");
+  assertEqual([a.cc, b.cc, a.pendingWager.accepted], [400, 200, { stake: 100 }], "both Stakes held in escrow on the offer until the fight's result is applied");
   assertEqual(acceptStake(a, b, "n1", NOW + 2000), { ok: false, reason: "no_wager" }, "second accept with same nonce fails");
+  assertEqual(refundWager(a, "n1"), 0, "expiry never refunds an accepted wager");
+  settleStake(a, "other");
+  assertTrue(!!a.pendingWager, "settling needs the offer's nonce");
+  settleStake(a, "n1");
+  assertEqual([a.cc, b.cc, a.pendingWager], [400, 200, null], "the applied result ends the escrow and moves no CC");
+}
+
+section("A fight that can't run, or a restart during it");
+{
+  const a = user("A", 500), b = user("B", 30);
+  offer(a, 100);
+  acceptStake(a, b, "n1", NOW);
+  assertEqual(refundAccepted(a, b, "other"), 0, "wrong nonce refunds nothing");
+  assertEqual(refundAccepted(a, b, "n1"), 30, "a failed fight returns the All-in Stake to each");
+  assertEqual([a.cc, b.cc, a.pendingWager], [500, 30, null], "both balances restored");
+  assertEqual(refundAccepted(a, b, "n1"), 0, "idempotent");
+
+  // A save while the fight was on the sim worker, then a restart.
+  const td = { A: user("A", 500), B: user("B", 500) };
+  offer(td.A, 200, "w");
+  attachMessage(td.A, "w", "m9");
+  acceptStake(td.A, td.B, "w", NOW);
+  const saved = JSON.parse(JSON.stringify(td));
+  assertEqual(refundAllPending(saved), [{ userId: "A", stake: 200, channelId: "chan", messageId: "m9", accepted: true, defenderId: "B" }], "the restart finds the accepted wager");
+  assertEqual([saved.A.cc, saved.B.cc, saved.A.pendingWager], [500, 500, null], "and refunds both Stakes");
 }
 
 section("All-in");

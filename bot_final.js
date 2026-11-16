@@ -303,7 +303,9 @@ setInterval(
 // ==========================================================
 function normalizeUserSchema(id, user) {
 
-  if (!user || typeof user !== "object") user = {};
+  // A brand-new record (a first chat message): with the full sim on, it has
+  // no moves from before the switch, so the cutover must leave it alone.
+  if (!user || typeof user !== "object") user = markNewPlayer({});
 
   // ==========================================================
   // 1️⃣ CORE FIELDS
@@ -477,9 +479,14 @@ import { finishAllOpenRuns, challengeLogEntry, hideOpenRun, challengeProgress } 
 import { recordFight, challengeRecord } from "./utils/fightRecordBuild.js";
 import { fightRecords } from "./utils/fightRecords.js";
 import { createFightRecordHandlers } from "./services/fightRecordsApi.js";
+import { createBattlePlanHandlers } from "./services/battlePlansApi.js";
+import { runCutover } from "./services/fullSimCutover.js";
+import { isFullSimEnabled, markNewPlayer } from "./config/fullSim.js";
+import { settleSimJobs } from "./utils/battle/simPool.js";
 import { showRunResult, challengeNames } from "./utils/battle/playback.js";
-import { powersFromLevels } from "./utils/battle/power.js";
+import { powersFromLevels, powersAtRanked, pokemonPower } from "./utils/battle/power.js";
 import { teamCheck } from "./services/teamCheck.js";
+import { modulePreloadPages } from "./utils/modulePreload.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -546,9 +553,15 @@ import { TRAINER_COSTS } from "./utils/trainerCosts.js";
 export { TRAINER_COSTS };
 
 
-// ✅ Serve all /public assets with correct MIME headers
+// ✅ Serve all /public assets with correct MIME headers.
+// Dashboard pages get modulepreload hints (utils/modulePreload.js). Images
+// (sprites, item art) are cached for a day instead of being revalidated on
+// every page change; scripts, styles and JSON keep revalidating (ETag) so a
+// deploy shows up on the next page load.
+const IMAGE_CACHE = "public, max-age=86400";
 app.use(
   "/public",
+  modulePreloadPages(staticPath),
   express.static(staticPath, {
     setHeaders: (res, filePath) => {
       if (filePath.endsWith(".js")) res.type("application/javascript");
@@ -556,6 +569,7 @@ app.use(
       if (filePath.endsWith(".json")) res.type("application/json");
       if (filePath.endsWith(".png")) res.type("image/png");
       if (filePath.endsWith(".gif")) res.type("image/gif");
+      if (/\.(gif|png|webp|jpe?g|svg)$/i.test(filePath)) res.setHeader("Cache-Control", IMAGE_CACHE);
     },
   })
 );
@@ -1323,6 +1337,12 @@ async function gracefulShutdown(signal) {
   }, 25000);
 
   try {
+    // Full sim: a fight on the sim worker applies its result when it resolves.
+    // Saving before that would store it half done (Stakes taken, an Elite
+    // Four run with no fight yet), so fights in progress finish first.
+    const settled = await settleSimJobs(5000).catch(() => false);
+    if (!settled) console.log("⚠️ A sim fight was still running at shutdown; it doesn't count.");
+
     console.log("💾 Flushing pending local saves...");
     const localSaved = await Promise.race([
       shutdownFlush(10_000),
@@ -1449,6 +1469,20 @@ const achievements = createAchievementHandlers({ getTrainerData: () => trainerDa
 const fightRecordApi = createFightRecordHandlers({ store: fightRecords, isAuthorized: requireDashboardSession });
 app.get("/api/fight-records", (req, res) => fightRecordApi.list(req, res));
 app.get("/api/fight-records/:fightId", (req, res) => fightRecordApi.get(req, res));
+
+// Battle plans (full sim): each fighting Team's plan, readiness and suggestions,
+// and setting a plan under the player's lock (services/battlePlansApi.js).
+const battlePlanApi = createBattlePlanHandlers({
+  getTrainerData: () => trainerData, isAuthorized: requireDashboardSession, lockUser, saveAndAck,
+});
+app.get("/api/battle-plans", (req, res) => battlePlanApi.get(req, res).catch((err) => {
+  console.error("❌ /api/battle-plans:", err?.message || err);
+  if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
+}));
+app.post("/api/battle-plan", express.json({ limit: "2kb" }), (req, res) => battlePlanApi.set(req, res).catch((err) => {
+  console.error("❌ /api/battle-plan:", err?.message || err);
+  if (!res.headersSent) res.status(500).json({ success: false, error: "Internal server error" });
+}));
 
 app.get("/api/achievements", (req, res) => {
   const { status, body } = achievements.view({ query: req.query, isAuthorized: (id) => requireDashboardSession(req, id) });
@@ -2402,6 +2436,11 @@ app.get("/api/user-pokemon", (req, res) => {
     // Read-only: each owned variant's Level and Power (six-stat total, same as /showteam).
     levels,
     powers: powersFromLevels(levels), // { "6:normal": 410 }
+    // Power at Lv 50 per species ({ "6": 534 }): Ranked and wager battles set
+    // every member to RANKED.level, so the Ranked team sorts on this.
+    powers50: powersAtRanked(levels),
+    // Each copy's Power at its own Level ({ uid: 410 }), for the Collection box.
+    copyPowers: Object.fromEntries(allCopies(u).map((c) => [c.uid, pokemonPower(c.id, c.level)]).filter(([, p]) => p != null)),
     // TM system (T5): trained copies per line, for the copy choosers in
     // donate / evolve / shiny craft / Teams. { "6:normal": [{ uid, rev, tmMoves, teams }] }
     trained: trainedSummary(u),
@@ -2850,12 +2889,13 @@ async function refundPendingWagersOnStartup() {
   if (!refunded.length) return;
   await enqueueSave(trainerData, { force: true });
   console.log(`⚔️ Refunded ${refunded.length} pending wager stake(s) after restart`);
-  for (const { channelId, messageId } of refunded) {
+  for (const { channelId, messageId, accepted } of refunded) {
     if (!channelId || !messageId) continue;
     try {
       const channel = await client.channels.fetch(channelId);
       const message = await channel.messages.fetch(messageId);
-      await message.edit({ content: "Wager expired (bot restarted). Stake refunded.", embeds: [], components: [] });
+      const content = accepted ? "Wager canceled (bot restarted during the fight). Both Stakes refunded." : "Wager expired (bot restarted). Stake refunded.";
+      await message.edit({ content, embeds: [], components: [] });
     } catch {}
   }
 }
@@ -2885,8 +2925,19 @@ async function closeRematchRequestsOnStartup() {
 // command playing it dies with the old process, so every open run is
 // finished at startup with no Revives, and its replay message gets the result.
 // ==========================================================
+// The full sim's learnsets differ from today's, so the first start with
+// FULL_SIM_ENABLED records every unpicked Team member's current moves
+// (services/fullSimCutover.js). Once per player; later starts do nothing.
+async function fullSimCutoverOnStartup() {
+  if (!isFullSimEnabled()) return;
+  const players = runCutover(trainerData);
+  if (!players) return;
+  await enqueueSave(trainerData, { force: true });
+  console.log(`⚔️ Full sim: recorded current moves for ${players} player(s)`);
+}
+
 async function finishOpenRunsOnStartup() {
-  const finished = finishAllOpenRuns(trainerData, new Date());
+  const finished = await finishAllOpenRuns(trainerData, new Date()); // a Promise under the full sim
   if (!finished.length) return;
   await enqueueSave(trainerData, { force: true });
   console.log(`⚔️ Finished ${finished.length} open Elite Four run(s) after restart`);
@@ -3012,6 +3063,7 @@ async function retryLoadLoop() {
 
   if (ok2) {
     await refundPendingWagersOnStartup().catch((e) => console.warn("⚠️ wager refund failed:", e?.message || e));
+    await fullSimCutoverOnStartup().catch((e) => console.warn("⚠️ full-sim cutover failed:", e?.message || e));
     await closeRematchRequestsOnStartup().catch((e) => console.warn("⚠️ closing rematch requests failed:", e?.message || e));
     await finishOpenRunsOnStartup().catch((e) => console.warn("⚠️ finishing open runs failed:", e?.message || e));
     isReady = true;
@@ -3031,6 +3083,7 @@ setTimeout(retryLoadLoop, retryMs);
   }
 
   await refundPendingWagersOnStartup().catch((e) => console.warn("⚠️ wager refund failed:", e?.message || e));
+  await fullSimCutoverOnStartup().catch((e) => console.warn("⚠️ full-sim cutover failed:", e?.message || e));
   await closeRematchRequestsOnStartup().catch((e) => console.warn("⚠️ closing rematch requests failed:", e?.message || e));
   await finishOpenRunsOnStartup().catch((e) => console.warn("⚠️ finishing open runs failed:", e?.message || e));
   isReady = true;

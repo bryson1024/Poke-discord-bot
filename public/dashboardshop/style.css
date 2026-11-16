@@ -29,8 +29,83 @@ main:focus { outline: none; }
 .stat-label { color: var(--cc-text-muted); font-weight: 600; }
 .stat-icon { width: 20px; height: 20px; image-rendering: pixelated; }
 
-/* Sections */
-.shop-section { margin: 24px 0 32px; }
+/* Sections — scroll-margin keeps a jumped-to heading clear of the sticky bar. */
+.shop-section { margin: 24px 0 32px; scroll-margin-top: calc(var(--shop-jump-h, 56px) + 12px); }
+.shop-section h2:focus { outline: none; }
+.shop-section h2:focus-visible { outline: 2px solid var(--cc-blue); outline-offset: 4px; }
+
+/* Section quick links (sectionNav.js): sticky chip row under the wallet.
+   One row that scrolls sideways on phones; no page-level header to clear. */
+.shop-jump {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  margin: 0 -24px;
+  padding: 8px 24px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  background: var(--cc-chrome);
+  border-bottom: 1px solid var(--cc-line);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.shop-jump[hidden] { display: none; }
+.shop-jump-list {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 2px;
+  list-style: none;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  scroll-padding-inline: 24px;
+}
+.shop-jump-list::-webkit-scrollbar { display: none; }
+.shop-jump-list li { flex: none; }
+/* Weekly Pack stays at the left edge while the rest of the row scrolls. */
+.shop-jump-list li.is-pinned {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  margin: -2px 0 -2px -2px;
+  padding: 2px 6px 2px 2px;
+  background: var(--cc-chrome);
+}
+.shop-jump-list.is-overflowing li.is-pinned { box-shadow: 8px 0 8px -6px #0008; }
+.shop-jump-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--cc-touch);
+  padding: 0 16px;
+  border: 1.5px solid var(--cc-line);
+  border-radius: var(--cc-r-chip, 999px);
+  background: var(--cc-surface);
+  color: var(--cc-text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.shop-jump-chip:hover { color: var(--cc-text); border-color: #3d4870; }
+.shop-jump-chip[aria-current] {
+  background: color-mix(in srgb, var(--cc-blue) 22%, var(--cc-surface));
+  border-color: var(--cc-blue);
+  color: var(--cc-text);
+}
+.shop-jump-chip.is-weekly { border-color: color-mix(in srgb, var(--cc-gold) 70%, var(--cc-line)); color: var(--cc-text); }
+.shop-jump-chip.is-weekly[aria-current] { background: color-mix(in srgb, var(--cc-gold) 22%, var(--cc-surface)); border-color: var(--cc-gold); }
+.shop-jump-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--cc-gold);
+  color: var(--cc-ink);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
 .shop-section h2 { margin: 0 0 4px; font-size: 20px; font-weight: 800; }
 .subtitle { margin: 0 0 12px; font-size: 14px; color: var(--cc-text-muted); }
 
@@ -148,6 +223,8 @@ main:focus { outline: none; }
 
 @media (max-width: 820px) {
   main { padding: 0 16px 32px; }
+  .shop-jump { margin: 0 -16px; padding-left: 16px; padding-right: 16px; }
+  .shop-jump-list { scroll-padding-inline: 16px; }
 }
 @media (max-width: 520px) {
   .shop-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
