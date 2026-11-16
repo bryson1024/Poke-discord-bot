@@ -35,8 +35,7 @@ import { chosenMoves, keepMovesOnLevelUp } from "../../services/movesets.js";
 import { chosenAbility } from "../../services/abilities.js";
 import { resolveBattleMega } from "../../services/megaTeam.js";
 import { megaBattleEligibility, megaBattleProfile } from "../megas.js";
-import { resolveSlotFusion, fusionBattleProfile } from "../fusions.js";
-import { isKyuremFusionEnabled } from "../../config/features.js";
+import { resolveSlotFusion, fusionBattleProfile, isFusionFormEnabled, fusionFamily } from "../fusions.js";
 import { isMegaCapabilityEnabled } from "../../config/features.js";
 import { rewardsOn, rollBattleShards } from "../../services/megaShards.js";
 import { createRng } from "./rng.js";
@@ -82,6 +81,9 @@ export function buildTeam(user, { env = process.env, team = user.displayedPokemo
   const items = battleItems(user, equipmentTeam, { env });
   // Each slot is one copy (docs/adr/0001); normalizeTeam keeps its uid.
   const owned = normalizeTeam(team, 6).filter((slot) => (user.pokemon?.[slot.id]?.[slot.variant] ?? 0) > 0);
+  // The team's one Mega slot: a Mega that really battles, else the first
+  // valid fusion form (Black/White Kyurem, Dusk Mane/Dawn Wings Necrozma).
+  let megaSlotTaken = !!mega?.ok;
   return owned
     .map((slot) => {
       const copyUid = slotBoxUid(user, slot) ?? null;
@@ -95,11 +97,12 @@ export function buildTeam(user, { env = process.env, team = user.displayedPokemo
       if (copyUid) member.copyUid = copyUid;
       const uid = slotCopyUid(user, slot) ?? null; // a trained copy (TM moves)
       if (uid) member.uid = uid;
-      // Black/White Kyurem (utils/fusions.js, fail-closed): resolved first, so
-      // the form's own moves (Freeze Shock, Fusion Bolt, …) count only when it
+      // Fusion forms (utils/fusions.js, fail-closed): resolved first, so the
+      // form's own moves (Freeze Shock, Sunsteel Strike, …) count only when it
       // really fights as that form.
-      const fusion = resolveSlotFusion(user, slot, owned, { env, megaActive: !!mega?.ok });
-      if (fusion && !fusion.ok && isKyuremFusionEnabled(env)) console.warn(`⚠️ ${fusion.formId} battles as Kyurem (${fusion.reason}).`);
+      const fusion = resolveSlotFusion(user, slot, owned, { env, megaActive: megaSlotTaken });
+      if (fusion?.ok) megaSlotTaken = true;
+      if (fusion && !fusion.ok && isFusionFormEnabled(fusion.formId, env)) console.warn(`⚠️ ${fusion.formId} battles as ${fusionFamily(fusion.formId)?.baseName} (${fusion.reason}).`);
       // The slot's own copy's moves (any copy, docs/adr/0001), else the line's.
       const moves = chosenMoves(user, movesetTeam, slot.id, slot.variant, { uid: copyUid ?? uid, form: fusion?.ok ? fusion.formId : null });
       if (moves) member.moves = moves;
@@ -116,8 +119,8 @@ export function buildTeam(user, { env = process.env, team = user.displayedPokemo
       // A slot battling as a Mega never uses a regular item (its Mega Stone fills the slot).
       const item = items.get(key) ?? (copyUid ? items.get(`${slot.id}:${slot.variant}`) : undefined);
       if (item && !(mega?.ok && mega.key === key)) member.item = item;
-      // Black/White Kyurem: the fusion's stats, ability and name for this
-      // battle; Level and item stay Kyurem's.
+      // A fusion form: its stats, ability and name for this battle; Level
+      // stays the base Pokémon's (its fusion item fills the item slot: heldItems.js).
       if (fusion?.ok) return { ...member, name: fusion.profile.name, baseName: member.name, fusionForm: fusion.formId, battleProfile: fusion.profile };
       if (!mega?.ok || mega.key !== key) return member;
       return { ...member, name: mega.profile.name, baseName: member.name, megaForm: mega.formId, battleProfile: mega.profile };
@@ -134,9 +137,9 @@ export const withoutMegaStats = (team) => team.map(({ battleProfile, ...m }) => 
 // saved, say) fights as its base form, failing closed like buildTeam.
 export function withMegaStats(members, { env = process.env } = {}) {
   return members.map((m) => {
-    // A saved Black/White Kyurem: its fusion stats while fusion is switched on.
+    // A saved fusion form: its stats while that fusion is enabled.
     if (m.fusionForm) {
-      if (isKyuremFusionEnabled(env)) return { ...m, battleProfile: fusionBattleProfile(m.fusionForm) };
+      if (isFusionFormEnabled(m.fusionForm, env)) return { ...m, battleProfile: fusionBattleProfile(m.fusionForm) };
       const { fusionForm, baseName, battleProfile, ...base } = m;
       return { ...base, name: baseName ?? base.name };
     }

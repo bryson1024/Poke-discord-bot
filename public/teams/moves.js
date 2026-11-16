@@ -56,7 +56,7 @@ async function postAbility(userId, team, s, ability) {
 }
 
 // The Ability block: Automatic + each regular ability, or the one it has.
-// formAbility: Black/White Kyurem's fixed ability while the slot uses that form.
+// formAbility: a fusion form's fixed ability while the slot uses that form.
 function abilityBlock(view, team, pick, formAbility = null) {
   if (formAbility) return `<div class="tm-ability"><p class="tm-ability-head">Ability</p><p class="tm-ability-only"><b>${esc(formAbility.name)}</b> <span class="tm-sub">${esc(formAbility.desc)} ${esc(formAbility.formName)} always has this ability.</span></p></div>`;
   if (!view?.options?.length) return "";
@@ -118,7 +118,7 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
   const trained = s.uid ? line.trained?.find((t) => t.uid === s.uid) ?? null : null;
   const copy = own ? { ...line, level: own.level, moves: own.moves, nextMoves: own.nextMoves, learnable: own.learnable, formLearnable: own.formLearnable, movesets: own.movesets, ability: own.ability ?? line.ability } : { ...line };
   copy.learnable ??= [];
-  // Black/White Kyurem: while this slot uses a fusion form (s.form, saved or
+  // Fusion forms: while this slot uses a fusion form (s.form, saved or
   // not), its own moves can be picked too (the server checks the form).
   const formExtra = (s.form && copy.formLearnable?.[s.form]) || [];
   if (formExtra.length) copy.learnable = [...copy.learnable, ...formExtra.filter((m) => !copy.learnable.some((x) => x.id === m.id))];
@@ -130,7 +130,7 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
   let picks = startPicks(copy, team);
   const startMoves = JSON.stringify(savedMoves(picks));
   // Ability: null = Automatic. Only full-sim servers send copy.ability.
-  // A fused Kyurem's ability is fixed (Teravolt / Turboblaze): no choice to make.
+  // A fusion form's ability is fixed (Teravolt, Turboblaze, Prism Armor): no choice to make.
   const formAbility = s.form ? line.formAbility?.[s.form] ?? null : null;
   const abilityView = formAbility ? null : copy.ability ?? null;
   const abilityStart = abilityView?.teams?.[team]?.chosen ?? null;
@@ -163,7 +163,7 @@ export async function openMovesEditor({ userId, team, s, name, recommended = nul
       <ul class="tm-movelist" aria-label="Learned moves">
         ${copy.learnable.map((m) => moveRow(m, {
           on: ticked.includes(m.id), full, recommended: rec.includes(m.id),
-          meta: moveMeta(m, { extra: [m.source === "tm" ? "TM" : m.source === "form" ? `${m.formName} · Lv ${m.learnedAt}` : m.learnedAt ? `Lv ${m.learnedAt}` : "", isStab(m) ? "STAB ×1.5" : ""] }),
+          meta: moveMeta(m, { extra: [m.source === "tm" ? "TM" : m.source === "form" ? (m.learnedAt > 1 ? `${m.formName} · Lv ${m.learnedAt}` : m.formName) : m.learnedAt ? `Lv ${m.learnedAt}` : "", isStab(m) ? "STAB ×1.5" : ""] }),
           details: moveDescLine(m),
         })).join("")}
       </ul>

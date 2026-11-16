@@ -48,7 +48,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const keyOf = (s) => `${s.id}:${s.variant}`;
 // A stored slot as the page keeps it. `uid` names a trained copy (TM system);
 // it must survive every edit, or saving would drop the copy from its slot.
-const slotFromServer = (s) => ({ id: Number(s.id), variant: s.variant === "shiny" ? "shiny" : "normal", ...(s.mega ? { mega: s.mega } : {}), ...(/^kyurem-(black|white)$/.test(s.form ?? "") ? { form: s.form } : {}), ...(s.uid ? { uid: s.uid } : {}) });
+const slotFromServer = (s) => ({ id: Number(s.id), variant: s.variant === "shiny" ? "shiny" : "normal", ...(s.mega ? { mega: s.mega } : {}), ...(/^(kyurem-(black|white)|necrozma-(duskmane|dawnwings))$/.test(s.form ?? "") ? { form: s.form } : {}), ...(s.uid ? { uid: s.uid } : {}) });
 const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
@@ -71,7 +71,7 @@ const state = {
   trained: {},           // "6:normal" → [trained copies] (TM system)
   megaOn: false,
   megaCards: [], // GET /api/mega cards (only while Mega Evolution is on)
-  fusion: { enabled: false, forms: [] }, // Black/White Kyurem (GET /api/user-pokemon `fusion`)
+  fusion: { enabled: false, forms: [] }, // fusion forms (GET /api/user-pokemon `fusion`)
   saved: { showcase: [], display: [], battle: null },
   copies: [],            // [[uid, id, shiny, level, caughtAt, trained, teams]] (docs/adr/0001)
   notices: [],           // one-time Battle team notices (GET /api/user-pokemon)
@@ -95,7 +95,10 @@ const state = {
 const species = (id) => state.data[id] ?? { name: `#${id}`, tier: "common", types: [] };
 const isMythic = (id) => String(species(id).tier).toLowerCase() === "mythic";
 /** Type chips (text on the type color, never color alone). Base form's types. */
-const typeChips = (id) => `<span class="tm-types">${(species(id).types ?? []).map((t) => TYPE_NAMES[t]).filter(Boolean).map((t) => `<span class="cc-type" data-type="${t}">${t}</span>`).join("")}</span>`;
+const chipsOf = (names) => `<span class="tm-types">${names.filter(Boolean).map((t) => `<span class="cc-type" data-type="${t}">${t}</span>`).join("")}</span>`;
+const typeChips = (id) => chipsOf((species(id).types ?? []).map((t) => TYPE_NAMES[t]));
+/** A team slot's types: a fusion form's own (Dusk Mane is Psychic/Steel), else the species'. */
+const slotTypeChips = (s) => (fusionOf(s)?.types ? chipsOf(fusionOf(s).types.map((t) => String(t).toLowerCase())) : typeChips(s.id));
 /** The copies of one Pokémon + Variant, best Level first: [{ uid, level, trained }]. */
 const copiesOfLine = (id, variant) => state.copies
   .filter((r) => r[1] === Number(id) && r[2] === (variant === "shiny" ? 1 : 0))
@@ -113,23 +116,26 @@ const levelOf = (s) => (s.uid && state.copies.find((r) => r[0] === s.uid)?.[3]) 
 const powerOf = (s) => state.powers[keyOf(s)] ?? 0;
 /** Power at Lv 50, the Level Ranked battles use: the Mega form's when the slot uses one. */
 const power50Of = (s) => (fusionOf(s)?.power50 ?? null) ?? (s.mega && state.megaOn ? megaCard(s.mega)?.power50 : null) ?? state.powers50[s.id] ?? 0;
-// ---------- Black/White Kyurem (utils/fusions.js) ----------
-const KYUREM = 646;
-const FUSION_EXCLUSIVE = new Set([643, 644, KYUREM]); // Reshiram, Zekrom, Kyurem
-/** The slot's fusion form while fusion is on, else null. */
+// ---------- Fusion forms (utils/fusions.js): Black/White Kyurem, Dusk Mane/Dawn Wings Necrozma ----------
+/** The slot's fusion form while it is enabled, else null. */
 const fusionOf = (s) => (s?.form && state.fusion.enabled ? state.fusion.forms.find((f) => f.id === s.form) ?? null : null);
-/** Fusion forms this Kyurem copy can use (Kyurem + the partner owned). */
-const fusionFormsFor = (s) => (Number(s.id) === KYUREM && state.fusion.enabled ? state.fusion.forms.filter((f) => f.unlocked?.[s.variant]) : []);
-/** Team rule (Casual and Ranked): the reason `s` can't join `list` beside a fused Kyurem, or null. */
+/** Fusion forms this copy can use (its species' forms with the partner owned). */
+const fusionFormsFor = (s) => (state.fusion.enabled ? state.fusion.forms.filter((f) => f.species === Number(s.id) && f.unlocked?.[s.variant]) : []);
+/** "Kyurem, Zekrom or Reshiram": the members a fused form's team can't have. */
+const familyNames = (f) => { const n = f.family.map((id) => species(id).name); return `${n.slice(0, -1).join(", ")} or ${n.at(-1)}`; };
+/** Family rule (Casual and Ranked): the reason `s` can't join `list` beside a fused family member, or null. */
 function fusionClash(list, s) {
   if (!state.fusion.enabled) return null;
-  const fused = list.find((m) => fusionOf(m));
-  if (fusionOf(s)) {
-    const other = list.find((m) => FUSION_EXCLUSIVE.has(Number(m.id)));
-    return other ? `${fusionOf(s).name} can't be on a team with ${slotName(other)}.` : null;
+  const own = fusionOf(s);
+  if (own) {
+    const other = list.find((m) => own.family.includes(Number(m.id)));
+    return other ? `${own.name} can't be on a team with ${slotName(other)}.` : null;
   }
-  return fused && FUSION_EXCLUSIVE.has(Number(s.id)) ? `${species(s.id).name} can't join a team with ${fusionOf(fused).name}.` : null;
+  const fused = list.map(fusionOf).find((f) => f && f.family.includes(Number(s.id)));
+  return fused ? `${species(s.id).name} can't join a team with ${fused.name}.` : null;
 }
+/** Ranked's one-mythic limit: a fused slot counts as mythic-tier. */
+const isMythicSlot = (s) => isMythic(s.id) || !!fusionOf(s);
 const fmt = (n) => Number(n).toLocaleString("en-US");
 const megaCard = (formId) => state.megaCards.find((c) => c.formId === formId);
 const slotName = (s) => fusionOf(s)?.name ?? (s.mega && state.megaOn ? megaCard(s.mega)?.name ?? megaName(s) : species(s.id).name);
@@ -168,12 +174,14 @@ function itemControls(t, s, i, name) {
   if (!state.held.enabled) return { badge: "", button: "" };
   const megaDraft = !!(s.mega && state.megaOn);
   const entry = loadoutOf(t, s);
-  // Black/White Kyurem: its DNA Splicers fill the item slot (like a Mega Stone).
+  // A fusion form: its fusion item (DNA Splicers, N-Solarizer, N-Lunarizer) fills the item slot, like a Mega Stone.
   if (fusionOf(s) || (entry?.megaSlot?.fusion && s.form)) {
-    const ph = entry?.megaSlot?.fusion ? entry.megaSlot : { glyph: "🧬", fusion: true };
+    const f = fusionOf(s);
+    const ph = f ? { glyph: f.glyph, fusion: true } : entry.megaSlot;
+    const itemName = f?.item ?? entry?.megaSlot?.stoneName ?? "Fusion item";
     return {
-      badge: `<span class="hi-badge" title="DNA Splicers: the fusion uses this item slot">${itemIcon(null, { size: "sm", mega: ph })}</span>`,
-      button: `<span class="hi-slotbtn is-mega" title="${esc(fusionOf(s)?.name ?? "Black/White Kyurem")} holds DNA Splicers on this team">${itemIcon(null, { size: "xs", mega: ph })} DNA Splicers</span>`,
+      badge: `<span class="hi-badge" title="${esc(itemName)}: the fusion uses this item slot">${itemIcon(null, { size: "sm", mega: ph })}</span>`,
+      button: `<span class="hi-slotbtn is-mega" title="${esc(f?.name ?? "This fusion")} holds ${esc(itemName)} on this team">${itemIcon(null, { size: "xs", mega: ph })} ${esc(itemName)}</span>`,
     };
   }
   if (megaDraft || (entry?.megaSlot && !entry.megaSlot.fusion)) {
@@ -200,13 +208,13 @@ function loadoutSummary(t) {
   const lo = state.held.teams[t] ?? [];
   const held = lo.filter((m) => m.item).length;
   const mega = lo.filter((m) => m.megaSlot && !m.megaSlot.fusion).length;
-  const splicers = lo.filter((m) => m.megaSlot?.fusion).length; // Black/White Kyurem
-  const open = lo.length - held - mega - splicers;
+  const fusionItems = lo.filter((m) => m.megaSlot?.fusion).map((m) => m.megaSlot.stoneName); // fusion forms
+  const open = lo.length - held - mega - fusionItems.length;
   const ids = lo.map((m) => m.item).filter(Boolean);
   const valid = new Set(ids).size === ids.length;
   return `<div class="hi-summary" role="status">
     <div class="hi-summary-icons" aria-hidden="true">${lo.map((m) => itemIcon(heldItem(m.item), { size: "sm", mega: m.megaSlot ?? false })).join("")}</div>
-    <p><b>Items ${held}/${lo.length}</b>${mega ? ` · ${mega} Mega Stone` : ""}${splicers ? " · DNA Splicers" : ""}${open ? ` · ${open} empty` : " · every slot equipped"} · ${valid ? "✓ all different" : "⚠ duplicate item"}</p>
+    <p><b>Items ${held}/${lo.length}</b>${mega ? ` · ${mega} Mega Stone` : ""}${fusionItems.length ? ` · ${esc(fusionItems.join(", "))}` : ""}${open ? ` · ${open} empty` : " · every slot equipped"} · ${valid ? "✓ all different" : "⚠ duplicate item"}</p>
     <p class="hi-summary-note">Items are permanent unlocks: one unlock works on every team, but only one Pokémon per team can hold it.</p>
   </div>`;
 }
@@ -233,15 +241,18 @@ function blockReason(t, s, { replaceAt = -1 } = {}) {
   if (list.some((m) => m.id === s.id && m.variant === s.variant)) return { code: "on", short: "On this team", text: `${species(s.id).name} is already on your ${LABEL[t]}.` };
   if (list.length >= MAX) return { code: "full", short: "Team full", text: `Your ${LABEL[t]} is full (6/6). Remove a Pokémon first.` };
   const clash = fusionClash(list, s);
-  if (clash) return { code: "fusion", short: "Kyurem rule", title: "Black or White Kyurem is on this team", text: `${clash} A team with Black or White Kyurem can't also have Kyurem, Zekrom or Reshiram.` };
+  if (clash) {
+    const fused = list.map(fusionOf).find(Boolean);
+    return { code: "fusion", short: "Fusion rule", title: `${fused?.name ?? "A fusion"} is on this team`, text: `${clash} A team with ${fused?.familyLabel ?? "a fusion"} can't also have ${fused ? familyNames(fused) : "its family"}.` };
+  }
   if (t === "battle" && isMythic(s.id)) {
-    const other = list.find((m) => isMythic(m.id));
+    const other = list.find(isMythicSlot);
     if (other) {
       return {
         code: "mythic",
         short: "Mythic limit",
         title: "One mythic-tier Pokémon per Ranked team",
-        text: `${species(s.id).name} can't join your Ranked team: it already has a mythic-tier Pokémon (${species(other.id).name}). Remove ${species(other.id).name} first, or add ${species(s.id).name} to your Casual team.`,
+        text: `${species(s.id).name} can't join your Ranked team: it already has a mythic-tier Pokémon (${slotName(other)}). Remove ${slotName(other)} first, or add ${species(s.id).name} to your Casual team.`,
       };
     }
   }
@@ -356,10 +367,10 @@ function cycleMega(t, i) {
       toast(`One Mega per team: ${species(list[other].id).name} goes back to its base form.`);
       delete list[other].mega;
     }
-    // Black/White Kyurem takes the Mega slot too: it goes back to Kyurem.
+    // A fusion form takes the Mega slot too: it goes back to its base Pokémon.
     const fused = isShowcase(t) ? -1 : list.findIndex((m, k) => k !== i && fusionOf(m));
     if (fused >= 0) {
-      toast(`One Mega slot per team: ${slotName(list[fused])} goes back to Kyurem.`);
+      toast(`One Mega slot per team: ${slotName(list[fused])} goes back to ${species(list[fused].id).name}.`);
       delete list[fused].form;
     }
     s.mega = next;
@@ -371,9 +382,10 @@ function cycleMega(t, i) {
 }
 
 /**
- * Kyurem's Form button: cycles Kyurem → each unlocked fusion form. On Casual
- * and Ranked a fused Kyurem can't share the team with Kyurem, Zekrom or
- * Reshiram: those forms are skipped, with a note (the server checks too).
+ * The Form button (Kyurem, Necrozma): cycles the base form → each unlocked
+ * fusion form. On Casual and Ranked a fused Pokémon can't share the team with
+ * its family, and on Ranked it counts as mythic-tier: a form that breaks a
+ * rule is skipped, with a note (the server checks too).
  */
 function cycleFusion(t, i) {
   const list = team(t).map((s) => ({ ...s }));
@@ -384,23 +396,35 @@ function cycleFusion(t, i) {
   let next = options[(options.indexOf(s.form ?? null) + 1) % options.length];
   if (next && !isShowcase(t)) {
     const clash = fusionClash(others, { ...s, form: next });
+    const f = fusionOf({ form: next });
+    const mythic = t === "battle" && !isMythic(s.id) ? others.find(isMythicSlot) : null;
     if (clash) {
-      toast(`${clash} Remove Kyurem, Zekrom and Reshiram from this team first.`);
+      toast(`${clash} Remove ${familyNames(f).replace(" or ", " and ")} from this team first.`);
+      next = null;
+    } else if (mythic) {
+      toast(`${f.name} counts as mythic-tier, and your Ranked team already has ${slotName(mythic)}. One mythic-tier Pokémon per Ranked team.`);
       next = null;
     }
   }
   if (next && !isShowcase(t)) {
-    // Black/White Kyurem uses the team's one Mega slot: a Mega goes back to its base form.
+    // A fusion form uses the team's one Mega slot: a Mega or another fusion goes back to its base form.
+    const name = fusionOf({ form: next })?.name ?? "This fusion";
     const mega = list.findIndex((m, k) => k !== i && m.mega && state.megaOn);
     if (mega >= 0) {
-      toast(`${fusionOf({ form: next })?.name ?? "Black/White Kyurem"} uses the team's Mega slot: ${species(list[mega].id).name} goes back to its base form.`);
+      toast(`${name} uses the team's Mega slot: ${species(list[mega].id).name} goes back to its base form.`);
       delete list[mega].mega;
+    }
+    const fused = list.findIndex((m, k) => k !== i && fusionOf(m));
+    if (fused >= 0) {
+      toast(`${name} uses the team's Mega slot: ${slotName(list[fused])} goes back to ${species(list[fused].id).name}.`);
+      delete list[fused].form;
     }
   }
   if (next) s.form = next;
   else delete s.form;
   state.draft[t] = list;
-  announce(next ? `Kyurem ${isShowcase(t) ? "shows" : "will battle"} as ${fusionOf(s)?.name ?? next}.` : `Kyurem ${isShowcase(t) ? "shows" : "will battle"} as Kyurem.`);
+  const base = species(s.id).name;
+  announce(next ? `${base} ${isShowcase(t) ? "shows" : "will battle"} as ${fusionOf(s)?.name ?? next}.` : `${base} ${isShowcase(t) ? "shows" : "will battle"} as ${base}.`);
   focusAfter = `[data-act="fusion"][data-team="${t}"][data-i="${i}"]`;
   render();
 }
@@ -426,10 +450,10 @@ async function copyFrom(target, source = SOURCES[target].find((t) => team(t).len
     const s = clone(s0);
     if (!isShowcase(target)) {
       if (lines.has(keyOf(s))) { dropped.push({ s, why: "already on the team" }); continue; }
-      if (target === "battle" && isMythic(s.id) && mythics++ >= 1) { dropped.push({ s, why: "one mythic-tier Pokémon per Ranked team" }); continue; }
+      if (target === "battle" && isMythicSlot(s) && mythics++ >= 1) { dropped.push({ s, why: "one mythic-tier Pokémon per Ranked team" }); continue; }
       if (s.mega && megas++ >= 1) delete s.mega; // one Mega per team: the rest come as their base form
-      if (fusionOf(s) && megas++ >= 1) delete s.form; // Black/White Kyurem uses that same Mega slot
-      if (s.form && fusionClash(kept, s)) delete s.form; // Black/White Kyurem beside Kyurem, Zekrom or Reshiram: plain Kyurem
+      if (fusionOf(s) && megas++ >= 1) delete s.form; // a fusion form uses that same Mega slot
+      if (s.form && fusionClash(kept, s)) delete s.form; // a fusion form beside its family: the base Pokémon
       if (!s.form && fusionClash(kept, s)) { const f = kept.find((m) => fusionOf(m)); if (f) delete f.form; }
       lines.add(keyOf(s)); // each Pokémon once on Casual and Ranked
     }
@@ -506,7 +530,7 @@ async function save() {
       if (body.saveDelayed || body.saved === false) toast(body.notice || "Saved with a delay. Your change is kept and will be written shortly.");
       if (Array.isArray(body.itemsCleared) && body.itemsCleared.length) {
         const why = body.itemsCleared.some((c) => c.reason === "mega_slot") ? " (Mega Evolution uses the item slot)"
-          : body.itemsCleared.some((c) => c.reason === "fusion_slot") ? " (Black/White Kyurem's DNA Splicers use the item slot)" : "";
+          : body.itemsCleared.some((c) => c.reason === "fusion_slot") ? " (a fusion form's fusion item uses the item slot)" : "";
         toast(`${body.itemsCleared.length} item${body.itemsCleared.length > 1 ? "s" : ""} came off your ${LABEL[t]}${why}. Your unlocks are kept.`);
       }
     }
@@ -535,7 +559,7 @@ function copyPayload(t) {
 }
 
 /** Hide the Battle team notices and tell the server they were seen. */
-// Ranked-team notices show on the Ranked tab; Black/White Kyurem ones on every tab.
+// Ranked-team notices show on the Ranked tab; fusion-form ones on every tab.
 const noticesFor = (t) => state.notices.filter((n) => n.kind === "fusion_revert" || t === "battle");
 async function dismissNotices() {
   const ids = noticesFor(state.active).map((n) => n.id);
@@ -571,8 +595,8 @@ function slotCard(t, s, i) {
   const tags = [
     i === 0 && !sc ? `<span class="tm-tag tm-tag--lead">Lead</span>` : "",
     s.mega && state.megaOn ? `<span class="tm-tag tm-tag--mega">Mega</span>` : "",
-    fusionOf(s) ? `<span class="tm-tag tm-tag--fusion" title="Kyurem fused with ${esc(fusionOf(s).partnerName)}">Fusion</span>` : "",
-    isMythic(s.id) ? `<span class="cc-tier" data-tier="mythic">Mythic</span>` : "",
+    fusionOf(s) ? `<span class="tm-tag tm-tag--fusion" title="${esc(species(s.id).name)} fused with ${esc(fusionOf(s).partnerName)}">Fusion</span>` : "",
+    isMythicSlot(s) ? `<span class="cc-tier" data-tier="mythic">Mythic</span>` : "",
     change ? `<span class="tm-tag tm-tag--change">${change}</span>` : "",
     isTrainedCopy(s) ? `<span class="tm-tag tm-tag--trained" title="This copy learned moves from TMs">★ Trained</span>` : "",
   ].join("");
@@ -589,13 +613,13 @@ function slotCard(t, s, i) {
     <div class="tm-slot-body">
       <div class="tm-slot-name" data-act="details" data-team="${t}" data-i="${i}">${esc(name)}</div>
       <div class="tm-slot-meta">${lvl}</div>
-      ${typeChips(s.id)}
+      ${slotTypeChips(s)}
       <div class="tm-slot-tags">${tags}</div>
       ${sc ? "" : `<button type="button" class="tm-movesbtn" data-act="moves" data-team="${t}" data-i="${i}" aria-label="${esc(species(s.id).name)}'s moves on your ${LABEL[t]}">Moves</button>`}
       ${copies > 1 ? `<button type="button" class="tm-movesbtn" data-act="pickcopy" data-team="${t}" data-i="${i}" aria-label="Change which ${esc(species(s.id).name)} is in this slot (you have ${copies})">Change copy</button>` : ""}
       ${ic.button}
       ${state.megaOn && megaFormsFor(s).length ? `<button type="button" class="tm-megabtn${s.mega ? " is-on" : ""}" data-act="mega" data-team="${t}" data-i="${i}" aria-label="Mega form for ${esc(species(s.id).name)}: ${s.mega ? esc(megaCard(s.mega)?.name ?? s.mega) : "off"}. Change">${s.mega ? `Mega: ${esc((megaCard(s.mega)?.name ?? s.mega).replace(/^Mega /, ""))}` : "Mega: off"}</button>` : ""}
-      ${fusionFormsFor(s).length ? `<button type="button" class="tm-megabtn tm-fusionbtn${fusionOf(s) ? " is-on" : ""}" data-act="fusion" data-team="${t}" data-i="${i}" aria-label="Form for Kyurem: ${fusionOf(s) ? esc(fusionOf(s).name) : "Kyurem"}. Change">Form: ${fusionOf(s) ? esc(fusionOf(s).shortName) : "Kyurem"}</button>` : ""}
+      ${fusionFormsFor(s).length ? `<button type="button" class="tm-megabtn tm-fusionbtn${fusionOf(s) ? " is-on" : ""}" data-act="fusion" data-team="${t}" data-i="${i}" aria-label="Form for ${esc(species(s.id).name)}: ${fusionOf(s) ? esc(fusionOf(s).name) : esc(species(s.id).name)}. Change">Form: ${fusionOf(s) ? esc(fusionOf(s).shortName) : esc(species(s.id).name)}</button>` : ""}
     </div>
     <div class="tm-slot-ctl">
       <span class="tm-grip" title="Drag to reorder"><svg class="tm-ic" aria-hidden="true"><use href="#tm-grip"/></svg></span>
@@ -662,15 +686,15 @@ app.addEventListener("toggle", (e) => { if (e.target.id === "teamCheck") state.c
 
 function rules() {
   const list = team("battle");
-  const mythic = list.filter((s) => isMythic(s.id)).length;
-  // The one Mega slot: a Mega or Black/White Kyurem (its BST is Mega-level).
+  const mythic = list.filter(isMythicSlot).length;
+  // The one Mega slot: a Mega or a fusion form (Mega-level stat totals).
   const mega = (state.megaOn ? list.filter((s) => s.mega).length : 0) + list.filter((s) => fusionOf(s)).length;
   const showMega = state.megaOn || state.fusion.enabled;
   const err = !!state.error.battle;
   return `<ul class="tm-rules" aria-label="Ranked team rules">
     <li class="tm-rule"><svg class="tm-ic" aria-hidden="true"><use href="#tm-swords"/></svg>Battles at <b>Lv ${BATTLE_LEVEL}</b></li>
     <li class="tm-rule${err ? " is-error" : mythic >= 1 ? " is-full" : ""}">Mythic <b>${mythic}/1</b></li>
-    ${showMega ? `<li class="tm-rule${mega >= 1 ? " is-full" : ""}" title="One Mega or Black/White Kyurem per team">Mega slot <b>${mega}/1</b></li>` : ""}
+    ${showMega ? `<li class="tm-rule${mega >= 1 ? " is-full" : ""}" title="One Mega or fusion form (Black/White Kyurem, Dusk Mane/Dawn Wings Necrozma) per team">Mega slot <b>${mega}/1</b></li>` : ""}
     <li class="tm-rule">Slots <b>${list.length}/6</b></li>
     ${list.length ? `<li class="tm-rule">Team power at Lv ${BATTLE_LEVEL} <b>${fmt(list.reduce((n, s) => n + power50Of(s), 0))}</b>${powerInfoButton()}</li>` : ""}
   </ul>`;
@@ -826,7 +850,7 @@ function saveBar() {
     const bits = [];
     if (added.length) bits.push(`added ${added.join(", ")}`);
     if (removed.length) bits.push(`removed ${removed.join(", ")}`);
-    // A Mega or Black/White Kyurem form switched on a Pokémon already on the team.
+    // A Mega or fusion form switched on a Pokémon already on the team.
     const reformed = b.filter((s) => { const m = a.find((x) => keyOf(x) === keyOf(s)); return m && ((m.form ?? null) !== (s.form ?? null) || (m.mega ?? null) !== (s.mega ?? null)); });
     if (reformed.length) bits.push(`new form for ${reformed.map((s) => species(s.id).name).join(", ")}`);
     if (!bits.length) bits.push("new order");

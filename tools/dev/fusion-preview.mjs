@@ -10,6 +10,8 @@
 // ==========================================================
 
 process.env.KYUREM_FUSION_ENABLED = "1";
+process.env.NECROZMA_FUSION_ENABLED = "1";
+process.env.POKEMON_GENERATIONS = "6,7"; // Necrozma, Solgaleo, Lunala
 process.env.HELD_ITEMS_ENABLED = "1"; // held items: DNA Splicers fill a fused Kyurem's item slot
 process.env.HELD_ITEMS_BATTLES_ENABLED = "1";
 process.env.FULL_SIM_ENABLED = "1"; // production engine (all four form moves)
@@ -36,7 +38,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const port = Number(process.argv[2] ?? 5261);
 const ID = "100000000000000646";
 const u = createNewUser(ID, "Fusion Preview");
-for (const s of [646, 644, 643, 6, 25, 149]) {
+for (const s of [646, 644, 643, 6, 25, 149, 800, 791, 792, 150]) {
   u.pokemon[s] = { normal: 1, shiny: s === 646 ? 1 : 0 };
   u.training ??= {};
   u.training[`${s}:normal`] = { exp: 60 ** 3 };
@@ -45,6 +47,7 @@ u.training["646:shiny"] = { exp: 55 ** 3 };
 u.training["646:normal"] = { exp: 85 ** 3 }; // Lv 85: both form moves learned
 u.displayedPokemon = [{ id: 646, variant: "normal", form: "kyurem-black" }, { id: 6, variant: "normal" }, { id: 25, variant: "normal" }];
 u.battleTeam = [{ id: 646, variant: "shiny" }, { id: 149, variant: "normal" }];
+u.displayedPokemon.push({ id: 800, variant: "normal" });
 normalizeBox(u);
 u.showcaseTeam = [];
 

@@ -99,6 +99,8 @@ export const ABILITY_REGISTRY = Object.freeze({
   // ---------------- defence ----------------
   "Thick Fat": { status: "implemented", source: SHOWDOWN, breakable: true, onSourceModifyAtk: (c) => (c.mt === "Fire" || c.mt === "Ice" ? 0.5 : 1) },
   "Filter": { status: "implemented", source: SHOWDOWN, breakable: true, onFinalDamage: (c) => (c.eff > 1 ? 0.75 : 1) },
+  // Dusk Mane / Dawn Wings Necrozma (utils/fusions.js): Filter that Mold Breaker can't bypass.
+  "Prism Armor": { status: "implemented", source: SHOWDOWN, onFinalDamage: (c) => (c.eff > 1 ? 0.75 : 1) },
   "Multiscale": { status: "implemented", source: SHOWDOWN, breakable: true, onFinalDamage: (c) => (c.target.hp === c.target.maxHp ? 0.5 : 1) },
   "Aura Guard": { status: "implemented", source: FUTURE, breakable: true, onFinalDamage: (c) => (c.move.flags?.contact ? 0.5 : 1) },
   "Shell Armor": { status: "implemented", source: SHOWDOWN, breakable: true, critImmune: true },

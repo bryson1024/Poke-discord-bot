@@ -23,7 +23,7 @@ import { toTeamObj } from "../utils/economyRules.js";
 import { learnableMoves, chosenMoves, formMoves, moveInfo as movesetMoveInfo } from "./movesets.js";
 import { fusionsOfSpecies } from "../utils/fusions.js";
 
-// Black/White Kyurem: each unlocked form's own moves at this Level, for the
+// Fusion forms: each unlocked form's own moves at this Level, for the
 // Teams moves editor (shown while the slot uses that form). {} for other species.
 const formLearnableAt = (user, id, variant, level) => Object.fromEntries(fusionsOfSpecies(id)
   .map((f) => [f.id, formMoves(user, id, variant, f.id, level).map((m) => ({ ...movesetMoveInfo(m.id), learnedAt: m.learnedAt, source: "form", form: f.id, formName: f.name }))])
@@ -136,7 +136,7 @@ export function pokemonDetail(user, speciesId, { env = process.env } = {}) {
       },
       learnable: species ? learnableMoves(user, id, variant, { level }).map((m) => ({ ...movesetMoveInfo(m.id), learnedAt: m.learnedAt, source: m.source })) : [],
       formLearnable: formLearnableAt(user, id, variant, level),
-      // Black/White Kyurem: each form's fixed ability (Teravolt / Turboblaze), shown while the slot uses it.
+      // Fusion forms: each form's fixed ability (Teravolt, Turboblaze, Prism Armor), shown while the slot uses it.
       formAbility: Object.fromEntries(fusionsOfSpecies(id).map((f) => [f.id, { ...abilityInfo(f.ability), formName: f.name }])),
       // Full sim: its regular abilities and, per team, the choice (null = Automatic) and Automatic's pick.
       ability: abilityView(user, id, variant, { env }),

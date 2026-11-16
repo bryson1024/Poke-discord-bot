@@ -35,7 +35,7 @@ const BLACK = { id: 646, variant: "normal", form: "kyurem-black" };
 
 section("catalogue");
 {
-  assertEqual(F.allFusions().length, 2, "two fusion forms");
+  assertEqual(F.fusionsOfSpecies(646).length, 2, "two Kyurem fusion forms");
   const b = F.getFusion("kyurem-black"), w = F.getFusion("kyurem-white");
   assertEqual(b.partner, 644, "Black Kyurem's partner is Zekrom");
   assertEqual(w.partner, 643, "White Kyurem's partner is Reshiram");
@@ -48,7 +48,7 @@ section("catalogue");
   assertEqual(total(w.baseStats), 700, "White Kyurem BST 700");
   assertTrue(getAbility("Teravolt")?.moldBreaker && getAbility("Turboblaze")?.moldBreaker, "legacy sim models both as Mold Breaker");
   for (const v of ["normal", "shiny", "grayscale"]) {
-    for (const f of F.allFusions()) {
+    for (const f of F.allFusions()) { // Kyurem and Necrozma forms
       const file = spriteFileFor(f.spriteId, v);
       assertTrue(file && fs.existsSync(new URL(`../public/${file}`, import.meta.url)), `${f.name} ${v} sprite exists (${file})`);
     }

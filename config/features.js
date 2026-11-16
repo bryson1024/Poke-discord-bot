@@ -148,3 +148,13 @@ export function isDashboardFightsEnabled(env = process.env) {
 export function isKyuremFusionEnabled(env = process.env) {
   return TRUE.has(String(env.KYUREM_FUSION_ENABLED ?? "").trim().toLowerCase());
 }
+
+// ----------------------------------------------------------
+// NECROZMA_FUSION_ENABLED: Dusk Mane and Dawn Wings Necrozma (utils/fusions.js).
+// Owning Necrozma plus Solgaleo/Lunala unlocks the form on Necrozma's team
+// slots. Off unless "1"/"true"/"yes"/"on", and Gen 7 must also be live
+// (POKEMON_GENERATIONS); off = a stored form shows and battles as Necrozma.
+// ----------------------------------------------------------
+export function isNecrozmaFusionEnabled(env = process.env) {
+  return TRUE.has(String(env.NECROZMA_FUSION_ENABLED ?? "").trim().toLowerCase());
+}

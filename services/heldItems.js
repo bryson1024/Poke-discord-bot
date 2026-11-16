@@ -43,8 +43,8 @@ import { getQuantity, grantItem } from "./inventory.js";
 import { megaFieldOf } from "./megaTeam.js";
 import { fusionFieldOf, getFusion } from "../utils/fusions.js";
 
-// Black/White Kyurem (utils/fusions.js): like a Mega's Mega Stone, the fused
-// Kyurem's DNA Splicers fill its item slot, so it holds no regular item.
+// Fusion forms (utils/fusions.js): like a Mega's Mega Stone, the fusion item
+// (DNA Splicers, N-Solarizer, N-Lunarizer) fills the slot, so it holds no regular item.
 const usesItemSlot = (s) => !!(s?.mega || s?.form);
 import { isHeldItemCapabilityEnabled } from "../config/features.js";
 import { getMega } from "../utils/megas.js";
@@ -148,10 +148,10 @@ export function fitsSpecies(entry, speciesId) {
 
 /** The Mega Stone shown as a virtual placeholder for a Mega slot (display only). */
 export function megaPlaceholder(slot) {
-  // Black/White Kyurem: DNA Splicers (no sprite yet: the dashboard shows a glyph).
+  // A fusion form: its fusion item (no sprites: the dashboard shows a glyph).
   if (slot?.form && !slot.mega) {
     const f = getFusion(slot.form);
-    return { formId: slot.form, name: f?.name ?? slot.form, stone: null, stoneName: "DNA Splicers", icon: null, iconSmooth: false, glyph: "🧬", fusion: true };
+    return { formId: slot.form, name: f?.name ?? slot.form, stone: null, stoneName: f?.item ?? "Fusion item", icon: null, iconSmooth: false, glyph: f?.glyph ?? "🧬", fusion: true };
   }
   if (!slot?.mega) return null;
   const f = getMega(slot.mega);
@@ -216,7 +216,7 @@ export function checkEquip(user, { teamId, line, itemId, move = false }) {
   const entry = heldEntry(itemId);
   if (!entry) return fail(400, "That isn't a held item.", "bad_item");
   if (slot.mega) return fail(409, "This Pokémon is set to Mega Evolve on this team: its Mega Stone uses the item slot.", "mega_slot");
-  if (slot.form) return fail(409, `This Kyurem is ${getFusion(slot.form)?.name ?? "fused"} on this team: its DNA Splicers use the item slot.`, "fusion_slot");
+  if (slot.form) { const f = getFusion(slot.form); return fail(409, `This Pokémon is ${f?.name ?? "fused"} on this team: its ${f?.item ?? "fusion item"} uses the item slot.`, "fusion_slot"); }
   if (!ownsHeldItem(user, itemId)) return fail(409, `You haven't unlocked ${entry.name} yet.`, "not_owned");
   if (!fitsSpecies(entry, slot.id)) return fail(409, `${entry.name} can't be held by that Pokémon. ${entry.held.rule}`, "wrong_species");
   if (current === itemId) return { ok: true, slot, entry, from: null, replaced: null, unchanged: true };

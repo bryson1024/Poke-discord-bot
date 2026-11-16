@@ -49,7 +49,7 @@ function cleanSlots(user, raw) {
     if (!uid) continue; // no copy left for this slot: it can't be shown
     used.add(uid);
     const mega = megaFieldOf(entry);
-    const form = storedFusion(user, slot, entry, "Showcase"); // Black/White Kyurem, while unlocked
+    const form = storedFusion(user, slot, entry, "Showcase"); // a fusion form, while unlocked
     out.push({ ...slot, uid, ...(mega && megaFitsSlot(user, slot, mega) ? { mega } : {}), ...(form ? { form } : {}) });
   }
   return out;
@@ -112,7 +112,7 @@ export function prepareShowcaseSelection(user, rawTeam, { env = process.env } = 
     }
     team.push({ ...slot, uid, ...(mega ? { mega } : {}), ...(form ? { form } : {}) });
   }
-  // Black/White Kyurem: unlocked and switched on. No team rule: the Showcase never fights.
+  // Fusion forms: unlocked and switched on. No team rule: the Showcase never fights.
   const fusionError = fusionSelectionError(user, team, { env, teamRule: false });
   if (fusionError) return fusionError;
   return { ok: true, team };
