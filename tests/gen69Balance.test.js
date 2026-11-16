@@ -61,8 +61,8 @@ enable([7]);
 const after = weightedOdds(all.filter((p) => C.isAcquirable(p.id)), { rank: null });
 const ratio = after.perSpecies.common / before.perSpecies.common;
 assertTrue(TIERS.every((t) => Math.abs(after.perSpecies[t] / before.perSpecies[t] - ratio) < 1e-12), "every existing species keeps the same relative odds (one common ratio for all tiers)");
-// 91.7% in docs/gen6-9/BALANCE.md; 91.6% since the 2026-11-11 re-tier changed the live pool's tier mix.
-assertEqual(ratio.toFixed(3), "0.916", "each existing species: 91.6% of today's odds");
+// 91.7% in docs/gen6-9/BALANCE.md; 91.6% after the 2026-11-11 re-tier; 91.8% since the Ultra Beasts moved to legendary (D11, 2026-11-16).
+assertEqual(ratio.toFixed(3), "0.918", "each existing species: 91.8% of today's odds");
 assertTrue(after.tierShare.legendary > before.tierShare.legendary && after.tierShare.mythic > before.tierShare.mythic, "Legendary and Mythic shares rise slightly (Alola adds 13 Legendary, 7 Mythic)");
 assertEqual(fs.existsSync(new URL("../docs/gen6-9/GEN7-ENCOUNTER-COMPARISON.md", import.meta.url)), true, "comparison document generated");
 

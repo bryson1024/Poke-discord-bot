@@ -38,7 +38,9 @@ import { isGenerationLive } from "../utils/speciesCatalog.js";
  * tier-based achievements reflect the new tiers; unlocks are never removed.
  */
 // 5: Pokédex-named achievements count the permanent Pokédex (docs/adr/0001).
-export const CATALOG_REVISION = 5;
+// 6: Regigigas → mythic (2026-11-16, D10): Hall of Legends now needs 43
+// Legendaries and Mythic Archive 26 Mythics. The retro pass re-runs once.
+export const CATALOG_REVISION = 6;
 
 export const CATEGORIES = Object.freeze({
   collection: { label: "Pokémon Collection", emoji: "📚", order: 1 },
@@ -55,8 +57,9 @@ export const CATEGORIES = Object.freeze({
 /** The original (Gen 1–5) Pokédex, national dex 1–649 — fixed targets of Release C entries. */
 export const SUPPORTED_SPECIES = 649;
 /** Legendary / Mythic species in Gen 1–5 (tier field). Was 48 / 21 until the
- * 2026-11-11 re-tier moved Dialga, Palkia, Giratina and Kyurem to mythic. */
-export const TIER_SPECIES = Object.freeze({ legendary: 44, mythic: 25 });
+ * 2026-11-11 re-tier moved Dialga, Palkia, Giratina and Kyurem to mythic,
+ * then 44 / 25 until Regigigas moved to mythic on 2026-11-16. */
+export const TIER_SPECIES = Object.freeze({ legendary: 43, mythic: 26 });
 /** Gen 1–5 evolution families with 2+ members (components of the Gen 1–5 evolution graph). */
 export const MULTI_MEMBER_FAMILIES = 225;
 /** The full National Pokédex once every generation is released. */

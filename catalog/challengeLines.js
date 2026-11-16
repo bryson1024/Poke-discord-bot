@@ -102,6 +102,13 @@ const LINES = {
     "Palkia, the dragon of space. Few dragon tamers ever see one. I won't forget this.",
     "Palkia? Fancy. Still not as cool as my team.",
   ],
+  486: [ // Regigigas
+    "Regigigas pulled the continents into place, they say. It won't move this ice so easily.",
+    "Regigigas! It towed whole continents with rope! Let's test that strength!",
+    "Regigigas takes its time waking up. At my age, I understand completely.",
+    "Regigigas shaped the land long before any dragon flew over it. I'll treat it with respect.",
+    "Regigigas? The giant that moved continents? Cool. It still has to get through me.",
+  ],
   487: [ // Giratina
     "Giratina... I've only read about it. Let's see how it handles the cold.",
     "Giratina! It came from another world, and it still has to get past my team!",
@@ -206,6 +213,13 @@ const LINES = {
     "Yveltal. Now that's a Pokémon I understand. Death has always been good company.",
     "When Yveltal's life ends, it takes everything around it. A dangerous partner. Respect it.",
     "Yveltal? It looks pretty mean. Good. I like a challenge.",
+  ],
+  718: [ // Zygarde
+    "Zygarde watches over the ecosystem. Ice is part of nature too.",
+    "Zygarde! Made of a hundred cells, and every one of them a fighter! So is my team!",
+    "Zygarde lurks in caves and watches. I know a thing or two about lurking.",
+    "Zygarde, a dragon that guards the balance of the world. I'll battle it with care.",
+    "Zygarde? The one that's split into a bunch of little cells? Cool trick. I'm still winning.",
   ],
   719: [ // Diancie
     "Diancie is a princess of diamonds. Diamonds and ice. We have a lot in common.",
