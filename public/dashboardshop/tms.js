@@ -43,6 +43,8 @@ function mount() {
   if (!main || document.getElementById("tmHeading")) return;
   const section = document.createElement("section");
   section.className = "shop-section tmx";
+  section.id = "tms";
+  section.dataset.navLabel = "TMs";
   section.setAttribute("aria-labelledby", "tmHeading");
   section.innerHTML = `
     <h2 id="tmHeading">Technical Machines</h2>
