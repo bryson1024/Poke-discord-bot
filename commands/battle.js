@@ -41,7 +41,7 @@ export const data = new SlashCommandBuilder()
     o.setName("wager").setDescription("CC each of you puts in the pot (they must accept). Always ranked").setMinValue(1));
 
 // Battles and wager offers are posted as new channel messages.
-const CHANNEL_PERMISSIONS = [
+export const CHANNEL_PERMISSIONS = [
   PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles,
 ];
 
@@ -49,7 +49,7 @@ const CHANNEL_PERMISSIONS = [
 // work only in this channel when it's set (/etc/pokebot.env in production,
 // .env locally), keeping them out of #general. Casual battles within the cap,
 // and ranked and wager battles, work anywhere. Unset, everything works anywhere.
-const casualChannelId = () => process.env.CASUAL_BATTLE_CHANNEL_ID || null;
+export const casualChannelId = () => process.env.CASUAL_BATTLE_CHANNEL_ID || null;
 
 export function refusal(reason, opponentId) {
   return {
@@ -149,7 +149,7 @@ export function vsView(mode, sides, names, trainerData, records, pot = null) {
 }
 
 // The replay's VS card, from the records captured before the battle (none: no card).
-const vsOf = (outcome, names, trainerData) => (outcome.vsRecords
+export const vsOf = (outcome, names, trainerData) => (outcome.vsRecords
   ? vsView(outcome.mode, outcome.sides, names, trainerData, outcome.vsRecords, outcome.mode === "wager" ? 2 * outcome.stake : null)
   : null);
 

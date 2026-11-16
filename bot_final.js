@@ -91,7 +91,7 @@ import { parseTeamCopy, applyTeamCopy } from "./services/teamCopy.js";
 import { rankBattleRatings } from "./commands/leaderboard.js";
 import { rankedRecord } from "./utils/battle/rewards.js";
 import { saveMoveset, TEAM_TYPES } from "./services/movesets.js";
-import { generateToken, validateToken, getChannelIdForToken, requireDashboardSession, requireAdminSession, adminSessionOf, activateAdminSession, activateDashboardSession, ADMIN_MAX_MS, DASHBOARD_MAX_MS, pruneExpiredTokens } from "./utils/dashboardAuth.js";
+import { generateToken, validateToken, getChannelIdForToken, dashboardSessionChannel, requireDashboardSession, requireAdminSession, adminSessionOf, activateAdminSession, activateDashboardSession, ADMIN_MAX_MS, DASHBOARD_MAX_MS, pruneExpiredTokens } from "./utils/dashboardAuth.js";
 import { rarityColors } from "./utils/rarityPalette.js";
 
 import {
@@ -479,6 +479,8 @@ import { finishAllOpenRuns, challengeLogEntry, hideOpenRun, challengeProgress } 
 import { recordFight, challengeRecord } from "./utils/fightRecordBuild.js";
 import { fightRecords } from "./utils/fightRecords.js";
 import { createFightRecordHandlers } from "./services/fightRecordsApi.js";
+import { createDashboardFights } from "./services/dashboardFights.js";
+import { isDashboardFightsEnabled } from "./config/features.js";
 import { createBattlePlanHandlers } from "./services/battlePlansApi.js";
 import { runCutover } from "./services/fullSimCutover.js";
 import { isFullSimEnabled, markNewPlayer } from "./config/fullSim.js";
@@ -552,6 +554,9 @@ app.get("/auth/admin", (req, res) => {
 import { TRAINER_COSTS } from "./utils/trainerCosts.js";
 export { TRAINER_COSTS };
 
+
+// The Battle page exists only while DASHBOARD_FIGHTS_ENABLED is on.
+app.use("/public/battle", (_req, res, next) => (isDashboardFightsEnabled() ? next() : res.status(404).send("Not found")));
 
 // ✅ Serve all /public assets with correct MIME headers.
 // Dashboard pages get modulepreload hints (utils/modulePreload.js). Images
@@ -1469,6 +1474,31 @@ const achievements = createAchievementHandlers({ getTrainerData: () => trainerDa
 const fightRecordApi = createFightRecordHandlers({ store: fightRecords, isAuthorized: requireDashboardSession });
 app.get("/api/fight-records", (req, res) => fightRecordApi.list(req, res));
 app.get("/api/fight-records/:fightId", (req, res) => fightRecordApi.get(req, res));
+
+// ⚔️ Battle page (services/dashboardFights.js): start Casual/Ranked battles and
+// Challenges from the dashboard, posted to Discord as the commands post them.
+// Behind DASHBOARD_FIGHTS_ENABLED; off, every route but /enabled answers 404.
+const dashboardFights = createDashboardFights({
+  getTrainerData: () => trainerData, lockUser, enqueueSave, client, fightRecords,
+  isAuthorized: requireDashboardSession, sessionChannel: dashboardSessionChannel,
+});
+const fightRoute = (handler) => async (req, res) => {
+  try {
+    await dashboardFights[handler](req, res);
+  } catch (err) {
+    console.error(`❌ /api/battle ${handler}:`, err?.message || err);
+    if (!res.headersSent) res.status(500).json({ ok: false, error: "Something went wrong. Your fight may not have started." });
+  }
+};
+app.get("/api/battle/enabled", fightRoute("enabledView"));
+app.get("/api/battle", fightRoute("state"));
+app.get("/api/battle/players", fightRoute("players"));
+app.get("/api/battle/team", fightRoute("team"));
+app.get("/api/battle/challenge", fightRoute("challengePreview"));
+app.get("/api/battle/run", fightRoute("run"));
+app.post("/api/battle/start", express.json({ limit: "4kb" }), fightRoute("startBattle"));
+app.post("/api/battle/challenge", express.json({ limit: "4kb" }), fightRoute("startChallenge"));
+app.post("/api/battle/revive", express.json({ limit: "4kb" }), fightRoute("revive"));
 
 // Battle plans (full sim): each fighting Team's plan, readiness and suggestions,
 // and setting a plan under the player's lock (services/battlePlansApi.js).
