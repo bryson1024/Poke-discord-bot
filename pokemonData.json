@@ -16265,7 +16265,7 @@
   "984": {
     "id": 984,
     "name": "Great Tusk",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16282,7 +16282,7 @@
   "985": {
     "id": 985,
     "name": "Scream Tail",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16299,7 +16299,7 @@
   "986": {
     "id": 986,
     "name": "Brute Bonnet",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16316,7 +16316,7 @@
   "987": {
     "id": 987,
     "name": "Flutter Mane",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16333,7 +16333,7 @@
   "988": {
     "id": 988,
     "name": "Slither Wing",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16350,7 +16350,7 @@
   "989": {
     "id": 989,
     "name": "Sandy Shocks",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16367,7 +16367,7 @@
   "990": {
     "id": 990,
     "name": "Iron Treads",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16384,7 +16384,7 @@
   "991": {
     "id": 991,
     "name": "Iron Bundle",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16401,7 +16401,7 @@
   "992": {
     "id": 992,
     "name": "Iron Hands",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16418,7 +16418,7 @@
   "993": {
     "id": 993,
     "name": "Iron Jugulis",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16435,7 +16435,7 @@
   "994": {
     "id": 994,
     "name": "Iron Moth",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [
@@ -16452,7 +16452,7 @@
   "995": {
     "id": 995,
     "name": "Iron Thorns",
-    "tier": "epic",
+    "tier": "legendary",
     "region": "Paldea",
     "generation": 9,
     "types": [

@@ -21,7 +21,7 @@ const { EVOLVE_STONE_COST } = await import("../services/gameplay.js");
 
 section("Approved tier overrides are live in pokemonData.json");
 const ids = Object.keys(OVERRIDES).map(Number);
-assertEqual(ids.length, 52, "52 approved tier changes (39 + D10 + D11)");
+assertEqual(ids.length, 64, "64 approved tier changes (39 + D10 + D11 + D12)");
 assertEqual(ids.filter((n) => DEX[n].tier !== OVERRIDES[n].tier), [], "every override is applied");
 assertEqual(ids.filter((n) => n <= 649 && BASELINE[n].tier !== OVERRIDES[n].from), [], "each Gen 1–5 override replaces its baseline tier");
 assertEqual(ids.filter((n) => OVERRIDES[n].from === OVERRIDES[n].tier), [], "no override is a no-op");
