@@ -27,6 +27,7 @@ import { playerId, showBanner, showExpired, toast, showActionError, confirmDialo
 import { displaySpeciesName } from "/public/shared/names.js";
 import { scanFx } from "/public/shared/spriteFx.js";
 import { openMovesEditor } from "/public/teams/moves.js";
+import { loadPlans, planRowHtml, savePlan, recommendedFor } from "/public/teams/plans.js";
 import { chooseCopy } from "/public/teams/copyPicker.js";
 import { openItemPicker, itemIcon, claimStarter } from "/public/teams/items.js";
 import { openDetail } from "/public/picker-pokemon/detail.js";
@@ -81,6 +82,8 @@ const state = {
   // A whole-team copy waiting for Save: { source: "display"|"battle", keys: ["6:normal", …] }.
   // Save sends it as copyFrom so the server copies those Pokémon's moves too.
   copied: { showcase: null, display: null, battle: null },
+  // Battle plans (GET /api/battle-plans, full sim only). enabled false = no plan row.
+  plans: { enabled: false, plans: [], teams: {} },
 };
 
 // ---------- helpers ----------
@@ -423,6 +426,7 @@ async function save() {
       }
     }
     await refreshHeld();
+    if (state.plans.enabled) state.plans = await loadPlans(userId).catch(() => state.plans); // a new lineup can change readiness
     toast(dirty.length > 1 ? "Teams saved." : `${LABEL[dirty[0]]} saved.`, { tone: "success" });
   } catch (err) {
     if (err.team) {
@@ -558,7 +562,7 @@ function teamPanel() {
     ? SOURCES[t].filter((o) => team(o).length).map((o) => `<button type="button" class="cc-btn tm-copyteam" data-act="copy" data-team="${t}" data-source="${o}">Copy from ${LABEL[o].replace(" team", "")}</button>`).join("")
     : "";
   return `<section id="teamPanel" class="tm-panel tm-panel--${t} tm-team" role="tabpanel" aria-labelledby="tab-${t}">
-    <div class="tm-panel-head">${head}<div class="tm-copyteams">${copyBtn}</div></div>${note}${isShowcase(t) ? "" : loadoutSummary(t)}${body}${err}
+    <div class="tm-panel-head">${head}<div class="tm-copyteams">${copyBtn}</div></div>${note}${isShowcase(t) ? "" : loadoutSummary(t)}${isShowcase(t) ? "" : planRowHtml(t, state.plans)}${body}${err}
     <button type="button" class="cc-btn tm-addbtn" data-act="openbox"><svg class="tm-ic" aria-hidden="true"><use href="#tm-plus"/></svg>Add from your box</button>
   </section>`;
 }
@@ -761,7 +765,7 @@ function onClick(e) {
   }
   else if (act === "moves") {
     const s = team(t)[i];
-    if (s) openMovesEditor({ userId, team: t, s, name: species(s.id).name, onSaved: () => render(), onTaught: () => refreshCopies() });
+    if (s) openMovesEditor({ userId, team: t, s, name: species(s.id).name, recommended: recommendedFor(state.plans, t, s), onSaved: () => refreshPlans(), onTaught: () => { refreshCopies(); refreshPlans(); } });
   }
   else if (act === "discard") discard();
   else if (act === "save") save();
@@ -769,8 +773,25 @@ function onClick(e) {
   else if (act === "openbox") openSheet();
   else if (act === "dismiss") dismissNotices();
 }
+// Plans are saved at once (not with the team's Save bar): a plan isn't part of the team's slots.
+async function refreshPlans() {
+  try { state.plans = await loadPlans(userId); } catch { /* keep what's shown */ }
+  render();
+}
+async function choosePlan(team, plan) {
+  try {
+    state.plans.teams[team] = await savePlan(userId, team, plan);
+    toast("Battle plan saved", { tone: "success" });
+  } catch (err) {
+    if (err.status === 403) return showExpired();
+    showActionError(err, "Couldn’t save the Battle plan");
+  }
+  render();
+}
+
 function onInput(e) {
   const el = e.target;
+  if (e.type === "change" && el.dataset?.act === "plan") return choosePlan(el.dataset.team, el.value);
   if (el.dataset?.act === "search") { state.filter.q = el.value; rememberFilter(); refreshBoxSoon(); }
   if (el.dataset?.act === "sort") { state.filter.sort = el.value; rememberFilter(); refreshBox(); }
 }
@@ -945,7 +966,7 @@ async function refreshCopies() {
 }
 
 // ---------- Pokémon details (the Collection's drawer) ----------
-const collectionHref = (id, variant) => `/public/picker-pokemon/?${new URLSearchParams({ id: userId, pokemon: id, variant })}`;
+const collectionHref = (id, variant, uid = null) => `/public/picker-pokemon/?${new URLSearchParams({ id: userId, pokemon: id, variant, ...(uid ? { copy: uid } : {}) })}`;
 const apiJSON = async (url) => {
   const res = await fetch(url, { credentials: "same-origin" });
   let body = {};
@@ -973,11 +994,15 @@ function openTeamDetails(t, i) {
       <button type="button" class="cc-btn" data-act="collection">Open in Collection</button>`,
     onAction: (act, d, variant) => {
       // The slot's own copy (TM system): its trained copy when the variant matches the slot.
-      if (act === "moves") openMovesEditor({ userId, team: t, s: { id: d.id, variant, ...(variant === s.variant && s.uid ? { uid: s.uid } : {}) }, name: species(d.id).name, onSaved: () => render(), onTaught: () => refreshCopies() });
-      else if (act === "collection") leaveTo(collectionHref(d.id, variant));
+      if (act === "moves") {
+        const slot = { id: d.id, variant, ...(variant === s.variant && s.uid ? { uid: s.uid } : {}) };
+        openMovesEditor({ userId, team: t, s: slot, name: species(d.id).name, recommended: recommendedFor(state.plans, t, slot), onSaved: () => refreshPlans(), onTaught: () => { refreshCopies(); refreshPlans(); } });
+      }
+      else if (act === "collection") leaveTo(collectionHref(d.id, variant, variant === s.variant ? s.uid : null));
     },
   }, {
     variant: s.variant,
+    uid: s.uid ?? null, // this slot's copy: its Level and equipped moves (what it battles with)
     level: t === "battle" ? "50" : "real",
     slotsFor: slotsOnScreen(s.id),
     megaName: s.mega && state.megaOn ? slotName(s) : null,
@@ -1006,6 +1031,11 @@ function openBoxDetails(s) {
 // ---------- load ----------
 async function load() {
   if (!userId) { app.innerHTML = ""; return; }
+  // Mega cards and held items start with the main data, not after it: each
+  // step in a row costs a round trip on a phone (dashboard UX audit).
+  const megaP = fetch(`/api/mega?id=${encodeURIComponent(userId)}`, { credentials: "same-origin" })
+    .then((m) => (m.ok ? m.json() : null)).catch(() => null);
+  const heldP = refreshHeld();
   try {
     const [pdRes, userRes] = await Promise.all([
       fetch("/public/pokemonData.json", { credentials: "same-origin" }),
@@ -1040,15 +1070,12 @@ async function load() {
     return;
   }
   // Mega sprites only while Mega Evolution is switched on server-side.
-  try {
-    const m = await fetch(`/api/mega?id=${encodeURIComponent(userId)}`, { credentials: "same-origin" });
-    const md = m.ok ? await m.json() : null;
-    state.megaOn = !!md?.enabled;
-    state.megaCards = state.megaOn && Array.isArray(md.cards) ? md.cards : [];
-  } catch { state.megaOn = false; }
+  const md = await megaP;
+  state.megaOn = !!md?.enabled;
+  state.megaCards = state.megaOn && Array.isArray(md.cards) ? md.cards : [];
   // Held items (only while switched on server-side). The eight free starter
   // unlocks are claimed on the first visit (idempotent on the server).
-  await refreshHeld();
+  await heldP;
   if (state.held.enabled && state.held.starterPending) {
     try {
       const r = await claimStarter(userId);
@@ -1056,6 +1083,7 @@ async function load() {
       if (r.granted?.length) toast(`You unlocked ${r.granted.length} free held items! Equip them with the Item button on each Pokémon.`, { tone: "success" });
     } catch (err) { if (!err.silent) showActionError(err, "Couldn't unlock your starter items"); }
   }
+  try { state.plans = await loadPlans(userId); } catch { /* the page works without plans */ }
   render();
   view.trackScroll();
   view.restoreScroll();

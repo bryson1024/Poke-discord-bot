@@ -3,7 +3,7 @@
 // Drives the real /challenge execute() and its preview buttons with stub
 // Discord objects. The fight must land on the live record (other commands
 // and the dashboard replace it with a copy), re-check everything at the
-// click, and never post the exact CC loss in public. Elite Four runs are
+// click, and post the exact CC loss in public only with the result. Elite Four runs are
 // driven through their private Revive menus.
 // ==========================================================
 
@@ -23,6 +23,7 @@ import { simulateChallenge, startRun, attachRunMessage } from "../utils/challeng
 import { CHALLENGES } from "../utils/challenge/roster.js";
 import { badgeUrl } from "../utils/challenge/badgeImages.js";
 import { buildTeam } from "../utils/battle/runBattle.js";
+import { registerHooks } from "module";
 
 PLAYBACK.delayMs = 0;
 const quiet = console.log;
@@ -484,8 +485,7 @@ section("Fight! and a loss");
     "the intro is the VS card, with the prize at stake and 10%");
   assertTrue(!(intro.content ?? "").includes("<@") && !(intro.content ?? "").includes("CC"), "and no mention or amount above it");
   const pub = t.publicText();
-  assertTrue(!pub.includes("1,234") && !pub.includes("1234") && !pub.includes("11,111") && !pub.includes("11111"), "no amount or balance in public");
-  assertTrue(pub.includes("💸 Lost 10% of their CC."), "the replay ends with the loss line");
+  assertTrue(pub.includes("💸 Lost 1,234 CC."), "the replay ends with the exact CC lost");
   assertEqual(t.collectors[0].ended !== null, true, "the preview stops listening");
 
   const again = await t.click("fight");
@@ -706,7 +706,7 @@ section("Elite Four run: a loss at Lorelei");
   const fight = await t.fightRun(async () => {});
   assertEqual([t.log.menus.length, t.trainerData.A.cc, t.trainerData.A.challenge.run], [0, 11111, undefined], "no menu; 10% lost; the run is closed");
   assertEqual(t.log.results.at(-1).content, "You lost 1,234 CC.", "the private result shows the amount");
-  assertTrue(!t.publicText().includes("1,234") && !t.publicText().includes("1234"), "the public replay never does");
+  assertTrue(t.publicText().includes("💸 Lost 1,234 CC."), "and the public replay ends with the same amount");
 }
 
 section("While a run is open");
@@ -776,6 +776,48 @@ section("A run that stopped unexpectedly");
   fresh.trainerData.A.challenge.run.updatedAt -= 14 * 60 * 1000;
   await fresh.run("brock");
   assertEqual(fresh.log.replies.at(-1).content, "Finish your Elite Four run first.", "a run 14 minutes quiet is still open");
+}
+
+section("Elite Four fights that fail (review I4)");
+{
+  // The full sim, wrapped so a test can make a fight throw the way a crashed
+  // sim worker would; inline (SIM_THREADS=0), so the wrapper is the full sim.
+  registerHooks({
+    load(url, context, next) {
+      if (url.endsWith("/utils/battle/showdown/simulate.js")) {
+        return { format: "module", shortCircuit: true, source: `import * as real from "./simulate.js?real";
+export function simulateFull(input) { if (globalThis.failFight?.()) throw new Error("test: the sim failed"); return real.simulateFull(input); }` };
+      }
+      return next(url, context);
+    },
+  });
+  process.env.FULL_SIM_ENABLED = "1";
+  process.env.SIM_THREADS = "0";
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const t = harness(runner());
+    await t.run("elite4");
+    globalThis.failFight = () => true;
+    const start = await t.click("fight_casual");
+    assertEqual(start.edits.at(-1)?.content, "The fight couldn't run. Try again.", "a first fight that fails says so");
+    assertEqual([t.trainerData.A.challenge.run, t.trainerData.A.challenge.attempts], [undefined, 0], "and leaves no run and spends no attempt");
+
+    const later = harness(runner());
+    await later.run("elite4");
+    let fights = 0;
+    globalThis.failFight = () => ++fights === 2;
+    const fight = await later.fightRun((menu) => later.pick(menu));
+    const run = later.trainerData.A.challenge.run;
+    assertEqual([run?.next, run?.fights.length], [1, 1], "a later fight that fails leaves the run open after the fights already played");
+    assertTrue(fight.followUps.some((o) => o.content === "The next fight couldn't run, so your run is paused. Use /challenge again in 15 minutes and it finishes without Revives."),
+      "and tells the player how it finishes");
+  } finally {
+    console.warn = warn;
+    globalThis.failFight = undefined;
+    delete process.env.FULL_SIM_ENABLED;
+    delete process.env.SIM_THREADS;
+  }
 }
 
 finish();
