@@ -11,6 +11,7 @@ import {
   CURRENT_SCHEMA_VERSION 
 } from './schemaValidator.js';
 import { migrateUserData, getSchemaVersion, stripDeprecatedFields } from './schemaMigration.js';
+import { markNewPlayer } from '../config/fullSim.js';
 
 /**
  * Initialize or normalize a user's trainer data with default values
@@ -19,7 +20,8 @@ import { migrateUserData, getSchemaVersion, stripDeprecatedFields } from './sche
  * @returns {object} Normalized user data object
  */
 export function initializeUserSchema(userId, username = "Trainer") {
-  return createDefaultUserData(userId, username);
+  // A new player: with the full sim on there are no moves from before it to keep.
+  return markNewPlayer(createDefaultUserData(userId, username));
 }
 
 /**

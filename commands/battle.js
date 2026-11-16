@@ -22,7 +22,7 @@ import { vsSide, battleVsAltText } from "../utils/render/battleVsCard.js";
 import { trainerTier, cardTrainerFx } from "../utils/render/trainerTier.js";
 import { playBattle, expSummary } from "../utils/battle/playback.js";
 import { teamPower } from "../utils/battle/power.js";
-import { offerWager, attachMessage, refundWager, acceptStake } from "../utils/battle/wager.js";
+import { offerWager, attachMessage, refundWager, acceptStake, settleStake, refundAccepted } from "../utils/battle/wager.js";
 import { WAGER, REMATCH, PLAYBACK } from "../utils/battle/tuning.js";
 import { openRematch, attachRematchMessage, settleRematch, blockRematch, liftRematchBlock } from "../utils/battle/rematch.js";
 import { peekNotices, clearNotices, NOTICE_KINDS } from "../services/notices.js";
@@ -74,6 +74,7 @@ export function refusal(reason, opponentId) {
     wager_dex_challenger: "Wager battles unlock once you've registered 25 Pokémon in your Pokédex.",
     wager_dex_defender: `<@${opponentId}> hasn't registered 25 Pokémon yet, so they can't play a wager battle.`,
     insufficient_cc: "You don't have that much CC.",
+    fight_failed: "The battle couldn't run, so nothing changed. Try again.",
     pending_exists: "You already have a wager waiting for an answer.",
     post_failed: "I couldn't post the wager here, so your Stake was refunded.",
     rematch_blocked: `<@${opponentId}> didn't accept your last rematch request. You can ask again after midnight UTC, or once they challenge you.`,
@@ -216,7 +217,15 @@ async function executeBattle(interaction, trainerData, lockUser, enqueueSave) {
     const late = wrongChannel();
     if (late) return { ok: false, reason: late };
     const before = vsRecords(trainerData, [challengerId, opponent.id], mode); // for the VS card
-    const out = runBattle({ trainerData, challengerId, defenderId: opponent.id, mode, seed });
+    // Awaited under the locks: a Promise from the sim worker under the full sim.
+    let out;
+    try {
+      out = await runBattle({ trainerData, challengerId, defenderId: opponent.id, mode, seed });
+    } catch (err) {
+      // The full sim's worker can fail a fight (crash, out of memory). Nothing was applied.
+      console.warn("⚠️ battle fight failed:", err?.message || err);
+      return { ok: false, reason: "fight_failed" };
+    }
     if (out.ok) out.vsRecords = before;
     // Results are applied and saved before the replay, so a failed or slow
     // replay never changes them. (A hard crash before the next Discord backup
@@ -371,9 +380,22 @@ async function offer(interaction, trainerData, lockUser, enqueueSave, opponent, 
       const accepted = acceptStake(live(), trainerData[defenderId], nonce, Date.now());
       if (!accepted.ok) return { error: accepted.reason };
       const before = vsRecords(trainerData, [challengerId, defenderId], "wager"); // for the VS card
-      const out = runBattle({
-        trainerData, challengerId, defenderId, mode: "wager", stake: accepted.stake, seed: randomInt(0, 2 ** 31 - 1),
-      });
+      let out;
+      try {
+        out = await runBattle({
+          trainerData, challengerId, defenderId, mode: "wager", stake: accepted.stake, seed: randomInt(0, 2 ** 31 - 1),
+        });
+      } catch (err) {
+        // The full sim's worker can fail a fight (crash, out of memory): both Stakes are in escrow, so give them back.
+        console.warn("⚠️ wager fight failed:", err?.message || err);
+        refundAccepted(live(), trainerData[defenderId], nonce);
+        await save();
+        return { canceled: "fight_failed" };
+      }
+      // The result (the pot included) is applied in the same tick the fight
+      // resolved, so the escrow ends here, before anything can save in between.
+      if (out.ok) settleStake(live(), nonce);
+      else refundAccepted(live(), trainerData[defenderId], nonce);
       if (out.ok) out.vsRecords = before;
       await save();
       return out;
@@ -385,6 +407,7 @@ async function offer(interaction, trainerData, lockUser, enqueueSave, opponent, 
       return i.followUp({ content: text, flags: MessageFlags.Ephemeral });
     }
     collector.stop("answered");
+    if (outcome.canceled === "fight_failed") return closeOffer("Wager canceled. The fight couldn't run, so both Stakes are refunded.");
     if (outcome.canceled) {
       const why = outcome.canceled === "team_changed" ? `<@${challengerId}>'s Team got stronger since the offer`
         : outcome.canceled.startsWith("no_team") ? "a Team is empty" : "one of you is out of battles";
@@ -504,13 +527,24 @@ async function requestRematch(interaction, trainerData, lockUser, enqueueSave, o
       // close() would wait on the lock this callback holds.
       if (!settleRematch(live(), defenderId, nonce)) return { error: "closed" };
       const before = vsRecords(trainerData, [challengerId, defenderId], "open"); // for the VS card
-      const out = runBattle({ trainerData, challengerId, defenderId, mode: "open", rematch: true, seed: randomInt(0, 2 ** 31 - 1) });
+      let out;
+      try {
+        // Awaited under the locks: a Promise from the sim worker under the full sim.
+        out = await runBattle({ trainerData, challengerId, defenderId, mode: "open", rematch: true, seed: randomInt(0, 2 ** 31 - 1) });
+      } catch (err) {
+        // The full sim's worker can fail a fight (crash, out of memory). Nothing
+        // was applied, and the settled request blocks nobody, so they can ask again.
+        console.warn("⚠️ rematch fight failed:", err?.message || err);
+        await save();
+        return { canceled: "fight_failed" };
+      }
       if (out.ok) out.vsRecords = before;
       await save();
       return out;
     });
     if (outcome.error) return notOpen();
     collector.stop("answered");
+    if (outcome.canceled === "fight_failed") return closeRequest("Rematch canceled. The fight couldn't run.");
     // Teams are checked again now; the only refusal left is an emptied Team.
     if (!outcome.ok) return closeRequest(`Rematch canceled. <@${outcome.reason === "no_team_challenger" ? challengerId : defenderId}> has no Team set.`);
     logEvent("battle", challengerId, {

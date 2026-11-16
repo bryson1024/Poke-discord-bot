@@ -29,6 +29,9 @@ let showOwnedOnly = false;
 let showUnownedOnly = false;
 let regionFilter = ""; // "" = every live region
 let shinyOnly = false;
+// Filters, sort and mode survive a trip to another page (this browser tab only).
+const view = viewState("collection", { q: "", tier: "", type: "", sort: "dex", extra: "", region: "", shiny: false });
+let lastCount = null; // { shown, total } from the last box render
 let regions = []; // [{ name, ids }], built once from pokemonData in init()
 // Multi-select (Donate mode). In-memory only; a reload resets it, and the
 // pageshow handler below resets it on a back/forward cache restore.
@@ -46,6 +49,7 @@ import { showMessage, showActionError, showExpired, showBanner, toast, EXPIRED_M
 import { displaySpeciesName, nameMatches } from "/public/shared/names.js";
 import { scanFx } from "/public/shared/spriteFx.js";
 import { openDetail } from "/public/picker-pokemon/detail.js";
+import { viewState, debounce } from "/public/shared/viewState.js";
 import { mountCopyChoice, copiesOf, teamNames } from "/public/picker-pokemon/copyChoice.js";
 import { GYM_BADGES, earnedBadgeKeys } from "/public/picker-pokemon/badges.js";
 
@@ -140,9 +144,11 @@ function tierOf(p) {
 
 // Released generations (GET /api/pokedex-status). Defaults to Gens 1–5.
 let releasedGenerations = new Set([1, 2, 3, 4, 5]);
+// Started by init() together with the other loads (one round trip, not three in a row).
+let pokedexStatusP = null;
 async function limitToReleasedGenerations(data, owned) {
   try {
-    const res = await fetch("/api/pokedex-status", { credentials: "same-origin" });
+    const res = await (pokedexStatusP ?? fetch("/api/pokedex-status", { credentials: "same-origin" }));
     if (res.ok) {
       const body = await res.json();
       if (Array.isArray(body.liveGenerations)) releasedGenerations = new Set(body.liveGenerations.map(Number));
@@ -567,6 +573,7 @@ function initCollectionFilters() {
       host.innerHTML = chip("", "All", "") + regions.map((r) => chip(r.name, r.name, `${countRegistered(r, userData.pokedex)}/${r.ids.length}`)).join("");
     };
     draw();
+    redrawRegionChips = draw;
     host.addEventListener("click", (e) => {
       const b = e.target.closest("[data-region]");
       if (!b) return;
@@ -578,9 +585,12 @@ function initCollectionFilters() {
   const shinyBtn = document.getElementById("shinyOnlyToggle");
   shinyBtn?.addEventListener("click", () => {
     shinyOnly = !shinyOnly;
-    shinyBtn.setAttribute("aria-pressed", String(shinyOnly));
-    shinyBtn.classList.toggle("active", shinyOnly);
+    syncShinyButton();
     renderPokemonGrid();
+  });
+  document.getElementById("activeFilters")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-clear]");
+    if (b) clearFilter(b.dataset.clear);
   });
 }
 
@@ -739,9 +749,70 @@ const SORT_KEYS = { level: bestLevel, power: bestPower, power50 };
 
 // Renders the grid, then the shiny backdrops (the Discord cards' motes + stars).
 function renderPokemonGrid() {
+  lastCount = null;
   renderPokemonGridCards();
   const grid = document.getElementById("pokemonGrid");
   if (grid) scanFx(grid);
+  renderActiveFilters();
+  rememberView();
+}
+
+// ---------- active filters: what is applied, one tap to undo each ----------
+const FILTER_CONTROLS = [
+  ["search", "q"], ["rarityFilter", "tier"], ["typeFilter", "type"], ["sortOrder", "sort"], ["extraFilter", "extra"],
+];
+const optionText = (id) => { const el = document.getElementById(id); return el?.selectedOptions?.[0]?.textContent?.trim() ?? ""; };
+function rememberView() {
+  const v = Object.fromEntries(FILTER_CONTROLS.map(([id, k]) => [k, document.getElementById(id)?.value ?? ""]));
+  view.set({ ...v, region: regionFilter, shiny: shinyOnly }); // never the mode: coming back in Donate mode would surprise
+}
+function renderActiveFilters() {
+  const host = document.getElementById("activeFilters");
+  if (!host) return;
+  const val = (id) => document.getElementById(id)?.value ?? "";
+  const chips = [];
+  if (val("search").trim()) chips.push(["search", `"${val("search").trim()}"`]);
+  if (val("rarityFilter")) chips.push(["rarityFilter", optionText("rarityFilter")]);
+  if (val("typeFilter")) chips.push(["typeFilter", optionText("typeFilter")]);
+  if (val("extraFilter")) chips.push(["extraFilter", optionText("extraFilter")]);
+  if (regionFilter) chips.push(["region", regionFilter]);
+  if (shinyOnly) chips.push(["shiny", "Shiny only"]);
+  if (val("sortOrder") !== "dex") chips.push(["sortOrder", optionText("sortOrder")]);
+  const count = lastCount ? `Showing ${lastCount.shown.toLocaleString("en-US")} of ${lastCount.total.toLocaleString("en-US")}` : "";
+  host.hidden = !chips.length && !count;
+  host.innerHTML = `${count ? `<span class="af-count" aria-live="polite">${count}</span>` : ""}${chips.map(([k, label]) =>
+    `<button type="button" class="af-chip" data-clear="${k}" aria-label="Remove filter: ${escAttr(label)}">${escAttr(label)} <span aria-hidden="true">✕</span></button>`).join("")}${chips.length > 1 ? `<button type="button" class="af-clear" data-clear="all">Clear all</button>` : ""}`;
+}
+const escAttr = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function clearFilter(k) {
+  const reset = (id, v = "") => { const el = document.getElementById(id); if (el) el.value = v; };
+  if (k === "all" || k === "search") reset("search");
+  if (k === "all" || k === "rarityFilter") reset("rarityFilter");
+  if (k === "all" || k === "typeFilter") reset("typeFilter");
+  if (k === "all" || k === "extraFilter") reset("extraFilter");
+  if (k === "all" || k === "sortOrder") reset("sortOrder", "dex");
+  if (k === "all" || k === "region") { regionFilter = ""; redrawRegionChips?.(); }
+  if (k === "all" || k === "shiny") { shinyOnly = false; syncShinyButton(); }
+  renderPokemonGrid();
+}
+function syncShinyButton() {
+  const b = document.getElementById("shinyOnlyToggle");
+  b?.setAttribute("aria-pressed", String(shinyOnly));
+  b?.classList.toggle("active", shinyOnly);
+}
+let redrawRegionChips = null;
+/** Saved filters back into the controls (before the first render). */
+function restoreView() {
+  const v = view.get();
+  for (const [id, k] of FILTER_CONTROLS) {
+    const el = document.getElementById(id);
+    if (!el || typeof v[k] !== "string") continue;
+    el.value = v[k];
+    if (el.tagName === "SELECT" && el.value !== v[k]) el.value = el.options[0]?.value ?? ""; // an option that no longer exists
+  }
+  if (regions.some((r) => r.name === v.region)) regionFilter = v.region;
+  shinyOnly = !!v.shiny;
+  syncShinyButton();
 }
 
 // ===========================================================
@@ -768,6 +839,9 @@ function renderBoxTiles(container) {
   const rarityFilter = (document.getElementById("rarityFilter")?.value || "").toLowerCase();
   const typeFilter = (document.getElementById("typeFilter")?.value || "").toLowerCase();
   const sortOrder = document.getElementById("sortOrder")?.value || "dex";
+  const extra = document.getElementById("extraFilter")?.value || "";
+  const lineCount = new Map();
+  if (extra === "dupes") for (const r of boxRows()) lineCount.set(`${r[1]}:${r[2]}`, (lineCount.get(`${r[1]}:${r[2]}`) ?? 0) + 1);
 
   const tiles = [];
   for (const [uid, id, shiny, level, at, trained, teams] of boxRows()) {
@@ -779,8 +853,14 @@ function renderBoxTiles(container) {
     if (typeFilter && !(p.types ?? []).map((t) => TYPE_MAP[t]).includes(typeFilter)) continue;
     if (regionFilter && p.region !== regionFilter) continue;
     if (shinyOnly && !shiny) continue;
+    if (extra === "team" && !teams) continue;
+    if (extra === "free" && teams) continue;
+    if (extra === "trained" && !trained) continue;
+    if (extra === "evolve" && !isEvolutionEligibleAnyVariant(id)) continue;
+    if (extra === "dupes" && (lineCount.get(`${id}:${shiny}`) ?? 0) < 2) continue;
     tiles.push({ uid, id, shiny: !!shiny, level, at, trained: !!trained, teams, p, tier });
   }
+  lastCount = { shown: tiles.length, total: boxRows().length };
 
   const byDex = (a, b) => a.id - b.id || b.level - a.level || a.uid.localeCompare(b.uid);
   const copyPower = (c) => userData.copyPowers?.[c.uid] ?? 0;
@@ -877,7 +957,8 @@ function onBoxTileClick(c, locked) {
     }
     return showBlockedActionModal(c.id);
   }
-  if (currentMode === "browse") return openDetail(c.id, detailContext());
+  // This copy's details: its Level, stats and equipped moves on each team.
+  if (currentMode === "browse") return openDetail(c.id, detailContext(), { variant: c.shiny ? "shiny" : "normal", uid: c.uid });
   if (currentMode === "evolve") return openEvolutionModal(c.id);
   if (currentMode === "donate") return openDonationConfirmModal(c.id, c.shiny ? "shiny" : "normal");
   if (currentMode === "convert") return openConvertModal(c.id);
@@ -1391,7 +1472,9 @@ async function init() {
       return;
     }
 
-    // Load Pokemon data
+    // Load everything at once: Pokémon data, the player, released generations.
+    pokedexStatusP = fetch("/api/pokedex-status", { credentials: "same-origin" }).catch(() => null);
+    const userP = fetchUserData().then(() => null, (err) => err);
     const pokeRes = await fetch("/public/pokemonData.json", { credentials: "same-origin" });
     if (!pokeRes.ok) throw new Error("Couldn't load the Pokédex. Please refresh the page.");
     pokemonData = await pokeRes.json();
@@ -1403,9 +1486,9 @@ async function init() {
     }
 
     // Load user data (cookie session; backend will 403 if invalid)
-    try {
-      await fetchUserData();
-    } catch (err) {
+    const userErr = await userP;
+    if (userErr) {
+      const err = userErr;
       setGridMessage("");
       if (err?.status === 403) showExpired();
       else showBanner(err?.message || "Couldn't load your Pokémon. Please try again.", { title: "Couldn't load your Pokémon" });
@@ -1426,8 +1509,11 @@ async function init() {
     initStickyHUD();
     setInterval(updateDustTimer, 30_000);
     initToggles();
+    restoreView();
     initCollectionFilters();
     setMode(currentMode);
+    view.trackScroll();
+    view.restoreScroll();
     startWeeklyPackCountdown();
     initMegaUI(); // no-op unless Mega Evolution is enabled server-side
 
@@ -1435,11 +1521,12 @@ async function init() {
     // opens that Pokémon's details on that copy.
     const linked = Number(params.get("pokemon"));
     if (Number.isInteger(linked) && pokemonData[linked]) {
-      openDetail(linked, detailContext(), { variant: params.get("variant") === "shiny" ? "shiny" : "normal" });
+      openDetail(linked, detailContext(), { variant: params.get("variant") === "shiny" ? "shiny" : "normal", uid: params.get("copy") || null });
     }
 
     // Filters
-    document.getElementById("search")?.addEventListener("input", renderPokemonGrid);
+    document.getElementById("search")?.addEventListener("input", debounce(renderPokemonGrid, 120));
+    document.getElementById("extraFilter")?.addEventListener("change", renderPokemonGrid);
     document.getElementById("rarityFilter")?.addEventListener("change", renderPokemonGrid);
     document.getElementById("typeFilter")?.addEventListener("change", renderPokemonGrid);
     document.getElementById("sortOrder")?.addEventListener("change", renderPokemonGrid);

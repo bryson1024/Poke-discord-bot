@@ -115,6 +115,16 @@
           </select>
           <button type="button" class="cc-info-btn" data-power-info aria-label="What is Power?" title="What is Power?">i</button>
 
+          <label class="sr-only" for="extraFilter">Show</label>
+          <select id="extraFilter">
+            <option value="">All copies</option>
+            <option value="team">On a team</option>
+            <option value="free">Not on a team</option>
+            <option value="trained">Trained (TM)</option>
+            <option value="evolve">Can evolve</option>
+            <option value="dupes">Duplicates</option>
+          </select>
+
           <!-- The box shows owned Pokémon only; missing ones are on the Pokédex page. -->
           <div class="toggle-group" role="group" aria-label="Show">
             <button id="shinyOnlyToggle" class="mode-btn" type="button" aria-pressed="false">✨ Shiny only</button>
@@ -122,6 +132,7 @@
         </div>
 
         <div id="regionChips" class="region-chips" role="group" aria-label="Region"></div>
+        <div id="activeFilters" class="active-filters" aria-label="Active filters" hidden></div>
 
         <div id="pokemonGrid">
           <p class="cc-empty">Loading your Pokémon…</p>

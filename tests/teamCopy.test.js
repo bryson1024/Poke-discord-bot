@@ -47,4 +47,27 @@ section("applyTeamCopy: moves follow the copied Pokémon");
   assertTrue(!("6:shiny" in (u.movesets.battle ?? {})), "key not on the team writes nothing");
 }
 
+section("applyTeamCopy: a slot's own copy gets the source copy's moves (2026-11-15)");
+{
+  const { addCopy } = await import("../services/box.js");
+  const { buildBattleTeam } = await import("../utils/battle/runBattle.js");
+  const { expForLevel } = await import("../utils/training.js");
+  const u = { pokemon: {} };
+  const uid = addCopy(u, 145, "normal", { exp: expForLevel(52) }).uid;
+  u.displayedPokemon = [{ id: 145, variant: "normal", uid }];
+  setMoveset(u, "display", 145, "normal", ["discharge", "pluck"], { uid });
+  setMoveset(u, "battle", 145, "normal", ["peck"]); // an old line pick on the target team
+  const saved = [{ id: 145, variant: "normal", uid }];
+  u.battleTeam = saved;
+  assertEqual(applyTeamCopy(u, { from: "display", to: "battle", keys: ["145:normal"] }, saved), ["145:normal"], "copied");
+  assertEqual(buildBattleTeam(u)[0].moves, ["discharge", "pluck"], "the ranked battle uses the copied moves");
+  assertEqual(u.movesets.battle["145:normal"], ["peck"], "the line pick is left alone");
+
+  // Automatic on the source → the same moves on the target, even with a line pick there.
+  setMoveset(u, "display", 145, "normal", null, { uid });
+  applyTeamCopy(u, { from: "display", to: "battle", keys: ["145:normal"] }, saved);
+  const { defaultMoves } = await import("../services/fullSimCutover.js");
+  assertEqual(buildBattleTeam(u)[0].moves, defaultMoves(u, { id: 145, variant: "normal", uid }, 52), "automatic source → its automatic moves, not the old line pick");
+}
+
 finish();
