@@ -84,7 +84,7 @@ const state = {
   // Held items (GET /api/held-items). enabled false = no item UI at all.
   held: { enabled: false, items: [], groups: [], rev: 0, teams: { showcase: null, display: null, battle: null } },
   // A whole-team copy waiting for Save: { source: "display"|"battle", keys: ["6:normal", …] }.
-  // Save sends it as copyFrom so the server copies those Pokémon's moves too.
+  // Save sends it as copyFrom so the server copies those Pokémon's moves, Abilities and held items too.
   copied: { showcase: null, display: null, battle: null },
   // Battle plans (GET /api/battle-plans, full sim only). enabled false = no plan row.
   plans: { enabled: false, plans: [], teams: {} },
@@ -339,7 +339,7 @@ const SOURCES = { showcase: ["display", "battle"], display: ["battle", "showcase
 /**
  * Copy the other team onto team `target`, after a confirmation: the same
  * Pokémon in the same order with their Mega choices; on Save the server
- * also copies each copied Pokémon's moves (copyFrom). Into the Battle team,
+ * also copies each copied Pokémon's moves, Ability and held item (copyFrom). Into the Battle team,
  * only the first mythic-tier Pokémon comes along. Nothing is saved here.
  */
 async function copyFrom(target, source = SOURCES[target].find((t) => team(t).length)) {
@@ -361,7 +361,7 @@ async function copyFrom(target, source = SOURCES[target].find((t) => team(t).len
     kept.push(s);
   }
   const current = state.draft[target];
-  const movesNote = isShowcase(source) || isShowcase(target) ? "Moves and held items aren't copied (the Showcase has none)." : `Each Pokémon brings its ${LABEL[source]} moves.`;
+  const movesNote = isShowcase(source) || isShowcase(target) ? "Moves, Abilities and held items aren't copied (the Showcase has none)." : `Each Pokémon brings its ${LABEL[source]} moves, Ability and held item.`;
   const msg = [
     current?.length ? `This replaces your ${LABEL[target]} (${current.length} Pokémon). ${movesNote}` : `This fills your ${LABEL[target]}. ${movesNote}`,
     isDirty(target) ? `Your unsaved changes to the ${LABEL[target]} will be replaced.` : "",
@@ -376,7 +376,7 @@ async function copyFrom(target, source = SOURCES[target].find((t) => team(t).len
   });
   if (!ok) return;
   state.draft[target] = kept;
-  // Moves come along only between the two fighting teams.
+  // Moves, Abilities and held items come along only between the two fighting teams.
   state.copied[target] = isShowcase(source) || isShowcase(target) ? null : { source, keys: kept.map(keyOf) };
   state.error[target] = null;
   state.active = target;
