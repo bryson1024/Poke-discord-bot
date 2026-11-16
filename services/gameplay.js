@@ -29,7 +29,8 @@ import { applyLimits, boostedWeights, pickWeighted, discountedPrice, hasCatchEff
 import { rollForShiny } from "../shinyOdds.js";
 import { grantCatch } from "../utils/training.js";
 import { canTransformCopy, transformCopy } from "./ownership.js";
-import { canFeed, feedCopy } from "./box.js";
+import { canUseRareCandy, applyRareCandy } from "./box.js";
+import { RARE_CANDY_WEEKLY_BUNDLE } from "../utils/battle/tuning.js";
 import { keepMovesOnLevelUp } from "./movesets.js";
 import { spritePaths } from "../spriteconfig.js";
 import { normVariant, isDisplayedVariant, tierKey, shinyEvolveDustCost, SHINY_CRAFT_COST_BY_TIER, ensureWeeklyReset } from "../utils/economyRules.js";
@@ -323,36 +324,50 @@ export function createGameplayHandlers(deps) {
   }
 
   // ======================================================
-  // 🍖 Feed one copy to another (docs/adr/0001): the fed copy is used up
-  // and the target gains today's duplicate share of one Level.
-  // body: { id, from, to, rev? (trained `from`), requestId? }
+  // 🍬 Rare Candy: use `qty` candies on one copy. Each gives its Level band's
+  // share of the EXP that copy needs for its next Level (services/box.js).
+  // body: { id, uid, qty?, requestId? }
   // ======================================================
-  async function feed({ body, isAuthorized }) {
-    const stop = guard(body, isAuthorized, (b) => (typeof b.from !== "string" || typeof b.to !== "string" ? reply(400, { error: "Missing from/to" }) : null));
+  async function useRareCandy({ body, isAuthorized }) {
+    const stop = guard(body, isAuthorized, (b) => (typeof b.uid !== "string" ? reply(400, { error: "Missing uid" }) : null));
     if (stop) return stop;
-    const { id, from, to, requestId = null, rev = undefined } = body;
+    const { id, uid, requestId = null } = body;
+    const qty = body.qty == null ? 1 : Number(body.qty);
+
     const tx = await runInventoryTransaction({
       trainerData: getTrainerData(),
       userId: id,
       lock: lockUser,
       save,
       requestId,
-      payloadKey: `feed:${from}>${to}`,
+      payloadKey: `rare_candy:${uid}x${qty}`,
       mutate: (user) => {
         normalizeUserSchema(id, user);
-        const can = canFeed(user, { from, to, confirmRev: rev });
-        if (!can.ok) return { ok: false, error: can.error, code: can.code, ...(can.protected && { protected: can.protected }) };
-        const species = user.box[to].id;
-        const done = feedCopy(user, { from, to, confirmRev: rev });
-        if (!done.ok) throw new Error(`feed: refused after validation (${done.code})`);
+        const rec = user.box?.[uid];
+        if (!rec) return { ok: false, error: "That Pokémon copy no longer exists.", code: "unknown_copy" };
+        const species = Number(rec.id);
+        const have = getQuantity(user, "rare_candy");
+        if (have < 1) return { ok: false, error: "You don't have any Rare Candy.", code: "not_enough" };
+        const args = { uid, qty, have };
+        const can = canUseRareCandy(user, args);
+        if (!can.ok) return { ok: false, error: can.error, code: can.code };
+        const paid = consumeItems(user, { rare_candy: can.used });
+        if (!paid.ok) return { ok: false, error: paid.error ?? "You don't have enough Rare Candy." };
+        const done = applyRareCandy(user, { ...args, qty: can.used });
+        if (!done.ok) throw new Error(`rare candy: refused after validation (${done.code})`);
         // New moves are learned, not equipped: teams keep the moves they had.
-        keepMovesOnLevelUp(user, species, user.box[to].shiny ? "shiny" : "normal", { uid: to, fromLevel: done.fromLevel, toLevel: done.toLevel });
-        return { ok: true, fed: { speciesId: species, to, gained: done.gained, fromLevel: done.fromLevel, toLevel: done.toLevel } };
+        keepMovesOnLevelUp(user, species, rec.shiny ? "shiny" : "normal", { uid, fromLevel: done.fromLevel, toLevel: done.toLevel });
+        return {
+          ok: true,
+          candy: { speciesId: species, uid, used: done.used, gained: done.gained, fromLevel: done.fromLevel, toLevel: done.toLevel },
+          rareCandyRemaining: getQuantity(user, "rare_candy"),
+        };
       },
     });
     if (!tx.ok) return refusal(tx);
-    if (!tx.replayed) logEvent("feed", id, { pokemonId: tx.result.fed.speciesId, gained: tx.result.fed.gained, toLevel: tx.result.fed.toLevel });
-    return reply(200, { ...saveAckFields(tx), success: true, replayed: !!tx.replayed, fed: tx.result.fed });
+    const { candy, rareCandyRemaining } = tx.result;
+    if (!tx.replayed) logEvent("rare_candy", id, { pokemonId: candy.speciesId, used: candy.used, gained: candy.gained, toLevel: candy.toLevel });
+    return reply(200, { ...saveAckFields(tx), success: true, replayed: !!tx.replayed, candy, rareCandyRemaining });
   }
 
   // ======================================================
@@ -412,20 +427,23 @@ export function createGameplayHandlers(deps) {
             sprite: pokemonSpritePath(reward.id, shiny ? "shiny" : "normal"),
           };
         });
+        // Every weekly pack also carries a Rare Candy bundle.
+        const rareCandy = grantItem(user, "rare_candy", RARE_CANDY_WEEKLY_BUNDLE).ok ? RARE_CANDY_WEEKLY_BUNDLE : 0;
         user.weeklyPackClaimed = true;
         trackProgress(user, [{ type: "weekly" }, { type: "pokemon" }, { type: "shiny", n: rewards.filter((r) => r.shiny).length }]);
-        return { ok: true, rewards: results };
+        return { ok: true, rewards: results, rareCandy };
       },
     });
     if (!tx.ok) return refusal(tx);
 
     logEvent("weekly_claim", id, {
+      rareCandy: tx.result.rareCandy,
       rewards: tx.result.rewards.map((r) => ({ pokemonId: r.id, pokemonName: r.name, tier: r.rarity, shiny: r.shiny })),
     });
-    return reply(200, { ...saveAckFields(tx), success: true, rewards: tx.result.rewards });
+    return reply(200, { ...saveAckFields(tx), success: true, rewards: tx.result.rewards, rareCandy: tx.result.rareCandy });
   }
 
-  return { rewardPokemon, evolve, convertToShiny, feed, weeklyPack };
+  return { rewardPokemon, evolve, convertToShiny, useRareCandy, weeklyPack };
 }
 
 // Re-exported for the Bag/shop code paths that grant items directly.

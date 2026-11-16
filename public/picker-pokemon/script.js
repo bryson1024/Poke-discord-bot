@@ -476,6 +476,7 @@ function updateDustTimer() {
 function updateHUD() {
   const stones = userData.items?.evolution_stone ?? 0;
   const dust = userData.items?.shiny_dust ?? 0;
+  const candy = userData.items?.rare_candy ?? 0;
   const cc = userData.cc ?? 0;
   const tp = userData.tp ?? 0;
   const rank = getRankFromTP(tp);
@@ -488,6 +489,8 @@ function updateHUD() {
 
   if (stoneEl) stoneEl.textContent = stones;
   if (dustEl) dustEl.textContent = dust;
+  const candyEl = document.getElementById("candyCount");
+  if (candyEl) candyEl.textContent = Number(candy).toLocaleString("en-US");
   if (ccEl) ccEl.textContent = Number(cc).toLocaleString("en-US");
   if (tpEl) tpEl.textContent = Number(tp).toLocaleString("en-US");
   if (rankEl) rankEl.textContent = rank;
@@ -830,7 +833,7 @@ function boxTileLocked(c, tier) {
     // Converting needs Dust, a normal copy, and no shiny of it owned yet (same rule as before).
     return c.shiny || cost <= 0 || (userData.items?.shiny_dust ?? 0) < cost || ownedCounts(c.id).shiny > 0;
   }
-  if (currentMode === "feed") return boxRows().filter((r) => r[1] === c.id && r[2] === (c.shiny ? 1 : 0)).length < 2;
+  if (currentMode === "candy") return (userData.items?.rare_candy ?? 0) < 1 || c.level >= CANDY_LEVEL_CAP;
   return false;
 }
 
@@ -844,7 +847,7 @@ function renderBoxTiles(container) {
   if (extra === "dupes") for (const r of boxRows()) lineCount.set(`${r[1]}:${r[2]}`, (lineCount.get(`${r[1]}:${r[2]}`) ?? 0) + 1);
 
   const tiles = [];
-  for (const [uid, id, shiny, level, at, trained, teams] of boxRows()) {
+  for (const [uid, id, shiny, level, at, trained, teams, exp] of boxRows()) {
     const p = pokemonData[id];
     if (!p) continue;
     const tier = tierOf(p);
@@ -858,7 +861,7 @@ function renderBoxTiles(container) {
     if (extra === "trained" && !trained) continue;
     if (extra === "evolve" && !isEvolutionEligibleAnyVariant(id)) continue;
     if (extra === "dupes" && (lineCount.get(`${id}:${shiny}`) ?? 0) < 2) continue;
-    tiles.push({ uid, id, shiny: !!shiny, level, at, trained: !!trained, teams, p, tier });
+    tiles.push({ uid, id, shiny: !!shiny, level, at, trained: !!trained, teams, exp: Number(exp) || 0, p, tier });
   }
   lastCount = { shown: tiles.length, total: boxRows().length };
 
@@ -949,10 +952,14 @@ function onBoxTileClick(c, locked) {
   pendingCopyUid = c.uid;
   viewVariant.set(c.id, c.shiny ? "shiny" : "normal");
   if (locked) {
-    if (currentMode === "donate" || currentMode === "feed") {
-      const msg = currentMode === "feed" && !c.teams
-        ? `You need another ${c.shiny ? "shiny " : ""}${c.p.name} to feed this one.`
-        : `This ${c.p.name} is on your ${teamNames(c.teams).join(" and ")} team. Take it off the team on the Teams page first.`;
+    if (currentMode === "candy") {
+      const msg = c.level >= CANDY_LEVEL_CAP
+        ? `${c.p.name} is already at Lv ${CANDY_LEVEL_CAP}.`
+        : "You don't have any Rare Candy. Catch a Pokémon you already have, claim /daily or the Weekly Pack, or keep chatting to find some.";
+      return showMessage({ title: "Not available", message: msg });
+    }
+    if (currentMode === "donate") {
+      const msg = `This ${c.p.name} is on your ${teamNames(c.teams).join(" and ")} team. Take it off the team on the Teams page first.`;
       return showMessage({ title: "Not available", message: msg });
     }
     return showBlockedActionModal(c.id);
@@ -962,57 +969,103 @@ function onBoxTileClick(c, locked) {
   if (currentMode === "evolve") return openEvolutionModal(c.id);
   if (currentMode === "donate") return openDonationConfirmModal(c.id, c.shiny ? "shiny" : "normal");
   if (currentMode === "convert") return openConvertModal(c.id);
-  if (currentMode === "feed") return openFeedModal(c);
+  if (currentMode === "candy") return openCandyModal(c);
 }
 
-// 🍖 Feed: another copy of the same Pokémon + Variant gives this one EXP
-// and is used up (POST /api/pokemon/feed). The fed copy can't be on a team.
-function openFeedModal(target) {
+// 🍬 Rare Candy: each candy gives this copy its Level band's share of the EXP
+// it needs for its next Level (POST /api/pokemon/rare-candy). Must match
+// RARE_CANDY_LEVEL_BANDS in utils/battle/tuning.js; the server decides.
+const CANDY_LEVEL_CAP = 100;
+const CANDY_BANDS = [[80, 0.125], [50, 0.25], [30, 0.5], [1, 1]];
+const candyShare = (lv) => CANDY_BANDS.find(([from]) => lv >= from)?.[1] ?? 1;
+const candyExpForLevel = (lv) => (lv <= 1 ? 0 : lv ** 3);
+const candyLevelOf = (exp) => {
+  let lv = Math.max(1, Math.floor(Math.cbrt(exp)));
+  while (lv > 1 && lv ** 3 > exp) lv--;
+  while ((lv + 1) ** 3 <= exp) lv++;
+  return Math.min(CANDY_LEVEL_CAP, lv);
+};
+function candyPlan(startExp, qty) {
+  const cap = candyExpForLevel(CANDY_LEVEL_CAP);
+  let exp = Math.min(cap, startExp);
+  let used = 0;
+  while (used < qty && exp < cap) {
+    const lv = candyLevelOf(exp);
+    exp = Math.min(cap, exp + Math.max(1, Math.floor((candyExpForLevel(lv + 1) - candyExpForLevel(lv)) * candyShare(lv))));
+    used++;
+  }
+  return { used, exp, level: candyLevelOf(exp) };
+}
+
+function openCandyModal(target) {
+  const have = userData.items?.rare_candy ?? 0;
+  const startExp = Math.max(target.exp || 0, candyExpForLevel(target.level));
+  // Most candies worth offering: enough to reach the top Level, never more than owned.
+  const most = candyPlan(startExp, Math.min(have, 1000)).used;
+  const pct = Math.round(candyShare(target.level) * 1000) / 10;
   const overlay = createOverlay();
   const modal = document.createElement("div");
   modal.style.cssText = "background:var(--card);border:2px solid var(--cc-blue);border-radius:14px;padding:1.5rem;text-align:center;max-width:460px;width:92%;";
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
-  modal.setAttribute("aria-label", `Feed ${target.p.name}`);
+  modal.setAttribute("aria-label", `Give Rare Candy to ${target.p.name}`);
   modal.innerHTML = `
-    <h2 style="margin:0 0 6px;">Feed ${target.shiny ? "✨ " : ""}${target.p.name} (Lv ${target.level})</h2>
-    <p style="margin:0;color:var(--cc-text-muted);">Give it another ${target.p.name}. The one you feed is used up and this one gains EXP. Your Pokédex keeps ${target.p.name} either way.</p>
-    <div class="cc-copyslot"></div>
+    <img src="/public/sprites/items/rare_candy.png" alt="" style="width:48px;height:48px;image-rendering:pixelated;">
+    <h2 style="margin:4px 0 6px;">Rare Candy for ${target.shiny ? "✨ " : ""}${target.p.name} (Lv ${target.level})</h2>
+    <p style="margin:0;color:var(--cc-text-muted);">Each Rare Candy gives this Pokémon ${pct}% of the EXP it needs for its next Level at Lv ${target.level} (less from Lv 30, 50 and 80). You have ${have.toLocaleString("en-US")}.</p>
+    <label style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:14px;">
+      How many?
+      <input class="candy-qty cc-input" type="number" min="1" max="${most}" value="1" inputmode="numeric" style="width:90px;">
+      <button class="candy-max cc-btn" type="button">Max (${most.toLocaleString("en-US")})</button>
+    </label>
+    <p class="candy-preview" aria-live="polite" style="margin:10px 0 0;font-weight:700;"></p>
     <div style="display:flex;gap:10px;justify-content:center;margin-top:12px;">
       <button class="cancel-btn cc-btn" type="button">Cancel</button>
-      <button class="confirm-btn cc-btn cc-btn--primary" type="button">Feed</button>
+      <button class="confirm-btn cc-btn cc-btn--primary" type="button">Use</button>
     </div>`;
   overlay.append(modal);
+  const qtyEl = modal.querySelector(".candy-qty");
+  const previewEl = modal.querySelector(".candy-preview");
   const confirmEl = modal.querySelector(".confirm-btn");
+  const qty = () => Math.floor(Number(qtyEl.value));
+  const sync = () => {
+    const n = qty();
+    const ok = Number.isInteger(n) && n >= 1 && n <= most;
+    confirmEl.disabled = !ok;
+    if (!ok) { previewEl.textContent = `Pick 1 to ${most.toLocaleString("en-US")}.`; return; }
+    const plan = candyPlan(startExp, n);
+    previewEl.textContent = plan.level > target.level
+      ? `Lv ${target.level} → Lv ${plan.level} (+${(plan.exp - startExp).toLocaleString("en-US")} EXP)`
+      : `+${(plan.exp - startExp).toLocaleString("en-US")} EXP, still Lv ${target.level}`;
+    confirmEl.textContent = `Use ${n.toLocaleString("en-US")}`;
+  };
+  qtyEl.addEventListener("input", sync);
+  modal.querySelector(".candy-max").addEventListener("click", () => { qtyEl.value = String(most); sync(); });
   modal.querySelector(".cancel-btn").addEventListener("click", () => closeOverlay(overlay));
-  let picker = null;
-  const sync = () => { confirmEl.disabled = !picker?.get().ok; };
-  picker = mountCopyChoice(modal.querySelector(".cc-copyslot"), {
-    userData, pokeId: target.id, variant: target.shiny ? "shiny" : "normal", name: target.p.name, mode: "feed", exclude: target.uid, onChange: sync,
-  });
   sync();
+  qtyEl.focus();
   const requestId = newRequestId();
   confirmEl.addEventListener("click", () => {
-    const from = picker.get();
-    if (!from.ok) return;
+    const n = qty();
+    if (!(n >= 1 && n <= most)) return;
     withActionLock(async () => {
       confirmEl.disabled = true;
       try {
-        const res = await apiJSON("/api/pokemon/feed", {
+        const res = await apiJSON("/api/pokemon/rare-candy", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: userId, from: from.uid, to: target.uid, requestId, ...(from.rev != null ? { rev: from.rev } : {}) }),
+          body: JSON.stringify({ id: userId, uid: target.uid, qty: n, requestId }),
         });
         closeOverlay(overlay);
         const prev = userData;
         await fetchUserData();
         refreshStats(userData, prev);
         renderPokemonGrid();
-        const f = res?.fed;
+        const f = res?.candy;
         toast(f && f.toLevel > f.fromLevel ? `${target.p.name} grew to Lv ${f.toLevel}!` : `${target.p.name} gained ${Number(f?.gained ?? 0).toLocaleString("en-US")} EXP.`);
       } catch (err) {
         confirmEl.disabled = false;
-        showActionError(err, "Couldn't feed");
+        showActionError(err, "Couldn't use Rare Candy");
       }
     });
   });

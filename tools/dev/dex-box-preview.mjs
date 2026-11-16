@@ -10,7 +10,7 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import { normalizeBox, allCopies, slotsHolding, mergeDex, feedCopy, canFeed } from "../../services/box.js";
+import { normalizeBox, allCopies, slotsHolding, mergeDex, applyRareCandy, canUseRareCandy } from "../../services/box.js";
 import { levelsForUser, expForLevel } from "../../utils/training.js";
 import { normalizeShowcase, prepareShowcaseSelection } from "../../services/showcaseTeam.js";
 import { prepareTeamSelection } from "../../services/megaTeam.js";
@@ -26,7 +26,7 @@ const ID = "100000000000000009";
 // Legacy-shaped player, migrated on start exactly like a live one at boot.
 const user = {
   id: ID, cc: 5200, tp: 4100,
-  items: { evolution_stone: 4, shiny_dust: 40 },
+  items: { evolution_stone: 4, shiny_dust: 40, rare_candy: 12 },
   pokemon: { 1: { normal: 1, shiny: 0 }, 4: { normal: 3, shiny: 0 }, 16: { normal: 5, shiny: 1 }, 25: { normal: 2, shiny: 1 }, 133: { normal: 3, shiny: 0 }, 150: { normal: 1, shiny: 0 } },
   training: { "4:normal": { exp: expForLevel(34) }, "16:normal": { exp: expForLevel(28) }, "16:shiny": { exp: expForLevel(9) }, "25:normal": { exp: expForLevel(22) }, "25:shiny": { exp: expForLevel(40) }, "133:normal": { exp: expForLevel(15) }, "150:normal": { exp: expForLevel(70) } },
   displayedPokemon: [{ id: 4, variant: "normal" }, { id: 25, variant: "shiny" }, { id: 150, variant: "normal" }],
@@ -81,13 +81,15 @@ app.post("/api/set-pokemon-team", (req, res) => {
   }
   res.json({ success: true, saved: true, teamType, currentTeam: user.displayedPokemon, battleTeam: user.battleTeam, showcaseTeam: user.showcaseTeam });
 });
-app.post("/api/pokemon/feed", (req, res) => {
-  const { from, to, rev } = req.body ?? {};
-  const can = canFeed(user, { from, to, confirmRev: rev });
+app.post("/api/pokemon/rare-candy", (req, res) => {
+  const { uid, qty = 1 } = req.body ?? {};
+  const have = user.items?.rare_candy ?? 0;
+  const can = canUseRareCandy(user, { uid, qty: Number(qty), have });
   if (!can.ok) return res.status(400).json({ success: false, error: can.error, code: can.code });
-  const species = user.box[to].id;
-  const r = feedCopy(user, { from, to, confirmRev: rev });
-  res.json({ success: true, fed: { speciesId: species, to, gained: r.gained, fromLevel: r.fromLevel, toLevel: r.toLevel } });
+  const species = user.box[uid].id;
+  const r = applyRareCandy(user, { uid, qty: can.used });
+  user.items.rare_candy = have - r.used;
+  res.json({ success: true, candy: { speciesId: species, uid, used: r.used, gained: r.gained, fromLevel: r.fromLevel, toLevel: r.toLevel }, rareCandyRemaining: user.items.rare_candy });
 });
 // Donate Duplicates / Multi-select through the real rules (flat rewards, no dust).
 const pokemonData = JSON.parse(readFileSync(path.join(ROOT, "public", "pokemonData.json"), "utf8"));

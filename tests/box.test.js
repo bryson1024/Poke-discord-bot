@@ -5,7 +5,7 @@
 
 import { assertTrue, assertEqual, section, finish } from "./harness.js";
 import {
-  normalizeBox, copiesOf, addCopy, feedCopy, canFeed, feedExpFor, dexMask, registeredIds,
+  normalizeBox, copiesOf, addCopy, canUseRareCandy, applyRareCandy, rareCandyExpFor, dexMask, registeredIds,
   mergeDex, isOnTeam, copyTraining, addCopyExp, DEX_NORMAL, DEX_SHINY,
 } from "../services/box.js";
 import { removeCopies, transformCopy, wipeCollection } from "../services/ownership.js";
@@ -79,26 +79,56 @@ section("Pokédex never drops");
   assertEqual(registeredIds(u).length, 0, "/resetuser clears the Pokédex");
 }
 
-section("Feed");
+section("Rare Candy");
 {
   const u = { pokemon: {} };
   const a = addCopy(u, 16, "normal", { exp: expForLevel(10) });
-  const b = addCopy(u, 16, "normal", { exp: expForLevel(5) });
-  u.displayedPokemon = [{ id: 16, variant: "normal", uid: b.uid }];
-  assertEqual(canFeed(u, { from: b.uid, to: a.uid }).code, "on_team", "a team copy can't be fed");
+  const step = expForLevel(11) - expForLevel(10);
+  const gap = (lv) => expForLevel(lv + 1) - expForLevel(lv);
+  assertEqual(rareCandyExpFor(10), step, "below Lv 30: a full Level");
+  assertEqual(rareCandyExpFor(29), gap(29), "Lv 29: still a full Level");
+  assertEqual(rareCandyExpFor(30), Math.floor(gap(30) * 0.5), "Lv 30-49: half");
+  assertEqual(rareCandyExpFor(50), Math.floor(gap(50) * 0.25), "Lv 50-79: a quarter");
+  assertEqual(rareCandyExpFor(79), Math.floor(gap(79) * 0.25), "Lv 79: still a quarter");
+  assertEqual(rareCandyExpFor(80), Math.floor(gap(80) * 0.125), "Lv 80+: an eighth");
+  assertEqual(rareCandyExpFor(100), 0, "nothing at the top Level");
+
+  const r = applyRareCandy(u, { uid: a.uid, qty: 2 });
+  assertTrue(r.ok, "two candies ok");
+  assertEqual(r.used, 2, "both used");
+  assertEqual(r.fromLevel, 10, "from Lv 10");
+  assertEqual(r.toLevel, 12, "a full Level each below Lv 30");
+  assertEqual(r.gained, rareCandyExpFor(10) + rareCandyExpFor(11), "each candy worked out at the Level reached");
+  assertEqual(copiesOf(u, 16, "normal").length, 1, "no copy used up");
+
+  assertEqual(canUseRareCandy(u, { uid: a.uid, qty: 5, have: 3 }).code, "not_enough", "can't use more than owned");
+  assertEqual(canUseRareCandy(u, { uid: a.uid, qty: 0 }).code, "bad_request", "qty must be at least 1");
+  assertEqual(canUseRareCandy(u, { uid: "nope", qty: 1 }).code, "unknown_copy", "unknown copy");
+
+  const top = addCopy(u, 16, "normal", { exp: expForLevel(99) + 1 });
+  const capped = canUseRareCandy(u, { uid: top.uid, qty: 50 });
+  assertTrue(capped.ok && capped.used === 9, "stops at the top Level: unneeded candies are not used");
+  applyRareCandy(u, { uid: top.uid, qty: 50 });
+  assertEqual(canUseRareCandy(u, { uid: top.uid, qty: 1 }).code, "max_level", "max Level refused");
+
+  // Team copies can take candy too.
   u.displayedPokemon = [{ id: 16, variant: "normal", uid: a.uid }];
-  const r = feedCopy(u, { from: b.uid, to: a.uid });
-  assertTrue(r.ok, "feed ok");
-  assertEqual(r.gained, feedExpFor(10), "gain = today's duplicate share at the target's Level");
-  assertEqual(copiesOf(u, 16, "normal").length, 1, "fed copy is gone");
-  assertEqual(dexMask(u, 16), DEX_NORMAL, "still registered");
-  const s = addCopy(u, 16, "shiny");
-  assertEqual(canFeed(u, { from: s.uid, to: a.uid }).code, "bad_request", "variants don't mix");
-  const t = addCopy(u, 16, "normal", { exp: 0 });
-  u.customPokemon = { [t.uid]: { uid: t.uid, speciesId: 16, variant: "normal", rev: 3, tmMoves: ["fly"], history: [] } };
-  assertEqual(canFeed(u, { from: t.uid, to: a.uid }).code, "stale_confirmation", "trained copy needs confirmation");
-  assertTrue(feedCopy(u, { from: t.uid, to: a.uid, confirmRev: 3 }).ok, "confirmed feed of a trained copy");
-  assertTrue(!u.customPokemon?.[t.uid], "its TM record went with it");
+  assertTrue(canUseRareCandy(u, { uid: a.uid, qty: 1 }).ok, "a team copy can take a Rare Candy");
+}
+
+section("duplicate catch gives a Rare Candy");
+{
+  const u = { pokemon: {}, items: {} };
+  const first = grantCatch(u, 25, "normal");
+  assertEqual(first.rareCandy, 0, "first catch: no candy");
+  assertEqual(u.items.rare_candy ?? 0, 0, "bag empty");
+  const shiny = grantCatch(u, 25, "shiny");
+  assertEqual(shiny.rareCandy, 0, "first shiny: no candy (NEW SHINY)");
+  const dup = grantCatch(u, 25, "normal");
+  assertEqual(dup.rareCandy, 1, "duplicate: one candy");
+  grantCatch(u, 25, "shiny");
+  assertEqual(u.items.rare_candy, 2, "shiny duplicate: one more");
+  assertEqual(copiesOf(u, 25, "normal").length, 2, "the duplicate still adds a copy");
 }
 
 section("removal: lowest spare first, team copies locked, admin may take them");

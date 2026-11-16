@@ -1,6 +1,6 @@
 // ==========================================================
 // public/picker-pokemon/copyChoice.js — "Which one?" for Donate, Evolve,
-// Convert to shiny and Feed.
+// and Convert to shiny.
 //
 // Every copy is its own Pokémon (docs/adr/0001), so the chooser lists each
 // copy of the Pokémon + Variant with its Level, its Teams and any TM moves.
@@ -67,9 +67,9 @@ export function copiesOf(userData, pokeId, variant) {
 
 /**
  * Mount the chooser into `container` (replacing its content).
- * mode: "donate" | "evolve" | "convert" | "feed". onChange(): after any change.
- * preselect: the uid of the tile the player tapped. exclude: uid(s) not to offer (the Feed
- * target, or copies already on the same team).
+ * mode: "donate" | "evolve" | "convert". onChange(): after any change.
+ * preselect: the uid of the tile the player tapped. exclude: uid(s) not to offer (copies
+ * already on the same team).
  * Returns { needed, get(): { ok, uid, rev, confirmTrained, copy } }.
  */
 export function mountCopyChoice(container, { userData, pokeId, variant, name, mode, onChange = () => {}, preselect = null, exclude = null }) {
@@ -77,8 +77,8 @@ export function mountCopyChoice(container, { userData, pokeId, variant, name, mo
   const skip = new Set([exclude ?? []].flat());
   const copies = copiesOf(userData, pokeId, variant).filter((c) => !skip.has(c.uid));
   container.innerHTML = "";
-  const lockedOut = (c) => (mode === "donate" || mode === "feed") && c.teams > 0;
-  if (mode !== "feed" && copies.length <= 1 && !copies.some((c) => c.trained)) {
+  const lockedOut = (c) => mode === "donate" && c.teams > 0;
+  if (copies.length <= 1 && !copies.some((c) => c.trained)) {
     const only = copies[0] ?? null;
     return { needed: false, get: () => ({ ok: true, uid: only?.uid ?? null, rev: null, confirmTrained: false, copy: only }) };
   }
@@ -86,7 +86,7 @@ export function mountCopyChoice(container, { userData, pokeId, variant, name, mo
   const group = `cc-copy-${Math.random().toString(36).slice(2, 8)}`;
   const usable = copies.filter((c) => !lockedOut(c));
   let choice = copies.find((c) => c.uid === preselect && !lockedOut(c))?.uid
-    ?? (mode === "donate" || mode === "feed" ? [...usable].reverse().find((c) => !c.trained)?.uid : usable[0]?.uid)
+    ?? (mode === "donate" ? [...usable].reverse().find((c) => !c.trained)?.uid : usable[0]?.uid)
     ?? null;
   let ack = false;
 
@@ -98,15 +98,15 @@ export function mountCopyChoice(container, { userData, pokeId, variant, name, mo
     const c = copies.find((x) => x.uid === choice) ?? null;
     const moves = c?.trained ? list(c.tmMoves.map((m) => m.name)) : "";
     container.innerHTML = `<div class="cc-copychoice">
-      <p class="cc-cc-title">${mode === "feed" ? `Feed which ${esc(name)}?` : `Which ${esc(name)}?`}</p>
+      <p class="cc-cc-title">Which ${esc(name)}?</p>
       <div class="cc-cc-list" role="radiogroup" aria-label="Which ${esc(name)}">
       ${copies.length ? copies.map((x) => `<label class="cc-cc-opt${lockedOut(x) ? " is-off" : ""}"><input type="radio" name="${group}" value="${esc(x.uid)}"${choice === x.uid ? " checked" : ""}${lockedOut(x) ? " disabled" : ""}>
         <span><b>Lv ${x.level}</b>${x.trained ? ` · ★ ${esc(x.tmMoves.map((m) => m.name).join(", ") || "TM-trained")}` : ""}</span><small>${esc(where(x))}${lockedOut(x) ? " · take it off first" : ""}</small></label>`).join("")
         : `<p class="cc-tmnote">You have no other ${esc(name)} to use.</p>`}
       </div>
-      ${c?.trained && (mode === "donate" || mode === "feed") ? `<div class="cc-tmwarn" role="alert">
+      ${c?.trained && mode === "donate" ? `<div class="cc-tmwarn" role="alert">
           <b>⚠️ This ${esc(name)} has TM-trained moves</b>
-          <p>It learned ${esc(moves)} from TMs. ${mode === "feed" ? "Feeding" : "Donating"} it permanently removes those trained moves. The TMs are not refunded.</p>
+          <p>It learned ${esc(moves)} from TMs. Donating it permanently removes those trained moves. The TMs are not refunded.</p>
           <label><input type="checkbox" data-ack${ack ? " checked" : ""}><span>I understand this trained ${esc(name)} and its TM moves will be gone.</span></label>
         </div>` : ""}
       ${c?.trained && (mode === "evolve" || mode === "convert") ? `<p class="cc-tmnote">Its TM moves (${esc(moves)}) stay with it.</p>` : ""}
@@ -129,7 +129,7 @@ export function mountCopyChoice(container, { userData, pokeId, variant, name, mo
       if (choice === null) return { ok: false, reason: copies.length ? `Choose which ${name}.` : `You have no other ${name} to use.` };
       const c = copies.find((x) => x.uid === choice);
       if (!c) return { ok: false, reason: "That Pokémon changed. Close and try again." };
-      if ((mode === "donate" || mode === "feed") && c.trained && !ack) return { ok: false, reason: "Tick the box to confirm.", copy: c };
+      if (mode === "donate" && c.trained && !ack) return { ok: false, reason: "Tick the box to confirm.", copy: c };
       return { ok: true, uid: c.uid, rev: c.trained ? c.rev : null, confirmTrained: mode === "donate" && c.trained, copy: c };
     },
   };

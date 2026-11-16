@@ -161,14 +161,15 @@ const ITEMS = [
   item({
     id: "rare_candy",
     name: "Rare Candy",
-    description: "Raises one owned Pokémon by one level (below level 50).",
+    description: "Gives one of your Pokémon EXP toward its next Level: a full Level below Lv 30, half up to Lv 50, a quarter up to Lv 80, an eighth after that. Use it from Collection on the dashboard.",
     category: "consumable",
     rarity: "rare",
     consumable: true,
-    status: "defined",
+    status: "active",
     storage: "inventory",
-    sources: ["shop", "achievement"],
-    sinceRelease: "E",
+    icon: "items/rare_candy.png",
+    sources: ["duplicate_catch", "daily", "weekly", "chat", "admin"], // never sold
+    sinceRelease: "rare-candy",
   }),
   item({
     id: "pokedex_scanner",

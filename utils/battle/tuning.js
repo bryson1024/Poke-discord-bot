@@ -41,7 +41,17 @@ export const CATCH_RANGES = {
 };
 export const CATCH_SKEW = 2; // > 1 leans rolls toward the low end
 export const CATCH_TAIL_CHANCE = 0.03;
-export const DUPLICATE_LEVEL_SHARE = 0.5; // of the EXP needed for the next Level
+// Rare Candy: one candy adds a share of the EXP the Pokémon needs for its
+// next Level, by Level band, so Pokémon that are already strong gain slowly.
+// Same for every Tier. [from Level, share], highest first:
+// below Lv 30 a full Level, 30-49 half, 50-79 a quarter, 80-99 an eighth.
+export const RARE_CANDY_LEVEL_BANDS = Object.freeze([[80, 0.125], [50, 0.25], [30, 0.5], [1, 1]]);
+export const rareCandyShare = (level) => RARE_CANDY_LEVEL_BANDS.find(([from]) => level >= from)?.[1] ?? 1;
+// Rare Candy drops: every /daily, every weekly pack, chat-message chance.
+// Not sold in any shop.
+export const RARE_CANDY_DAILY = 2;
+export const RARE_CANDY_WEEKLY_BUNDLE = 10;
+export const RARE_CANDY_CHAT_CHANCE = 0.01;
 
 // Battle EXP (Gen V formula). 0.035 ≈ 2 months from Lv 5 → 100 at 10 battles/day.
 export const BST_YIELD_SCALE = 0.035;

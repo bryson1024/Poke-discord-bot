@@ -66,9 +66,12 @@ _Avoid_: XP (TP is already the chat-activity points), experience points
 The **Level** a new **Copy** rolls when it is caught, set by its **Stage**, with Stage 1 legendaries and mythics rolling high. Every catch rolls one, duplicates included.
 _Avoid_: wild level, spawn level
 
-**Feed**:
-Giving up one **Copy** to add **EXP** to another copy of the same species and **Variant**. The fed copy is gone; the species stays **Registered**. A copy on a **Team** can't be fed.
-_Avoid_: merge, sacrifice, candy
+**Rare Candy**:
+A bag item that adds **EXP** to any one **Copy**: a share of the EXP that copy needs for its next **Level**, by Level band and the same for every **Tier**: a full Level below Lv 30, half from Lv 30, a quarter from Lv 50, an eighth from Lv 80. A **Duplicate catch** gives one, every `/daily` gives two, the Weekly Pack carries ten, and chatting can find one. Admins can grant it; no shop sells it. A copy on a **Team** can take it.
+_Avoid_: feed, merge, sacrifice
+
+**Duplicate catch**:
+A catch of a species and **Variant** already **Registered** in the **Pokédex**. It still adds a **Copy** with its own **Catch level**, and also gives one **Rare Candy**. A first shiny is NEW SHINY, not a duplicate.
 
 ### Trainer
 
@@ -345,6 +348,6 @@ _Avoid_: trophy, quest
 > **Dev:** What if I want CC on the line?
 > **Domain expert:** Then it's a **Wager battle**, which plays by the ranked rules with a **Stake** on top. They have to accept first, it uses one of each player's **Battle cap**, and both of you earn EXP.
 > **Dev:** I caught a second Charmander — does it get its own **Level**?
-> **Domain expert:** Yes. It's a separate Pokémon in your **Collection** with its own **Catch level**. If you'd rather make your first one stronger, **Feed** the new one to it.
+> **Domain expert:** Yes. It's a separate Pokémon in your **Collection** with its own **Catch level**. You also got a **Rare Candy** for the duplicate, which you can use to make either one stronger.
 > **Dev:** And if I donate both Charmanders?
 > **Domain expert:** Your **Collection** has no Charmander, but it stays **Registered** in your **Pokédex**, so your Kanto **Pokédex completion** doesn't drop.
