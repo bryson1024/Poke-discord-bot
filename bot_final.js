@@ -2677,7 +2677,7 @@ app.post("/api/set-pokemon-team", express.json(), async (req, res) => {
       });
     }
     // Optional: this team was copied from the other one (Teams page "Copy
-    // from …"); the copied Pokémon's moves come along in the same write.
+    // from …"); the copied Pokémon's moves, Abilities and held items come along in the same write.
     const copy = parseTeamCopy(req.body, teamType);
     if (!copy.ok) return res.status(copy.status).json({ success: false, error: copy.error, code: copy.code });
 
